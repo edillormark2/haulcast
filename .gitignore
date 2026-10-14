@@ -28,7 +28,7 @@ test-results/
 .env.*
 !.env.example
 .vercel/
-.claude/settings.local.json
+.claude/
 
 # The assessment brief stays local
 *.pdf
