@@ -36,6 +36,10 @@ export function RouteList({ plan, departureMs }: { plan: Plan; departureMs: numb
           />
         ))}
       </ol>
+      <p className="mt-2 text-2xs text-fg-subtle">
+        Planned with {plan.routes[0]?.router ?? 'the routing service'}. Times assume continuous
+        driving.
+      </p>
     </section>
   )
 }

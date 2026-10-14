@@ -6,7 +6,7 @@ import {
 } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 
-import type { ApiError } from '../../api/client'
+import { ApiError } from '../../api/client'
 import type { TripRequest } from '../../api/types'
 import { Button } from '../../ui/Button'
 import { SAMPLE_TRIPS, withNextDeparture } from './sampleTrips'
@@ -91,17 +91,36 @@ export function LoadingState({ interval }: { interval: number }) {
 }
 
 export function ErrorState({ error, onRetry }: { error: ApiError | Error; onRetry: () => void }) {
+  const details = fieldMessages(error)
   return (
     <section role="alert" className="space-y-3 rounded-xl bg-surface px-4 py-4 ring-1 ring-line">
       <p className="flex gap-2 text-sm font-semibold text-fg">
         <WarningCircleIcon size={18} className="mt-px shrink-0 text-risk-severe-text" aria-hidden />
         Couldn&apos;t plan this trip
       </p>
-      <p className="text-sm leading-relaxed text-fg-muted">{error.message}</p>
-      <Button size="sm" onClick={onRetry}>
-        <ArrowClockwiseIcon size={14} weight="bold" aria-hidden />
-        Try again
-      </Button>
+      <p className="text-sm leading-relaxed text-fg-muted">
+        {details.length > 0 ? `${details.join(' ')} Edit the trip to fix it.` : error.message}
+      </p>
+      {details.length === 0 && (
+        <Button size="sm" onClick={onRetry}>
+          <ArrowClockwiseIcon size={14} weight="bold" aria-hidden />
+          Try again
+        </Button>
+      )}
     </section>
   )
+}
+
+/** Field-level validation messages from the API, flattened to sentences. */
+function fieldMessages(error: Error): string[] {
+  if (!(error instanceof ApiError) || !error.fields) return []
+  const collect = (value: unknown): string[] =>
+    typeof value === 'string'
+      ? [value]
+      : Array.isArray(value)
+        ? value.flatMap(collect)
+        : typeof value === 'object' && value !== null
+          ? Object.values(value).flatMap(collect)
+          : []
+  return collect(error.fields)
 }

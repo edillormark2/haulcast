@@ -1,0 +1,98 @@
+# Design record
+
+How each requirement and evaluation criterion in the Spotter brief is met, and why the
+main decisions went the way they did.
+
+## Requirements traceability
+
+| Brief | Where it's met |
+| --- | --- |
+| User enters origin and destination | Place search with suggestions ([`PlaceField.tsx`](../frontend/src/features/trip-form/PlaceField.tsx), Photon via [`geocoding.py`](../backend/planner/services/geocoding.py)) |
+| …departure date/time | `datetime-local` input with quick picks; sent as ISO 8601 with the viewer's offset; validated to now−1 h … now+7 days |
+| …load weight | Pounds, 0–80,000, with a live hint naming the load rules that apply at that weight |
+| Generate 3 route options using a routing API | [`routing.py`](../backend/planner/services/routing.py): Valhalla truck costing (weight-aware), OSRM beyond Valhalla's distance limit, quality-checked via-point detours when the router returns fewer than three |
+| Sample weather every 10 / 25 / 50 miles | Interval picker; [`geometry.checkpoint_miles`](../backend/planner/domain/geometry.py) places checkpoints at 0, N, 2N … plus the destination |
+| …using the truck's estimated arrival time at each checkpoint | [`timeline.py`](../backend/planner/domain/timeline.py) turns router maneuver timings into elapsed time per mile; [`forecast.py`](../backend/planner/domain/forecast.py) reads wind at that instant and precipitation for the hour being driven through |
+| Calculate weather risk using the risk/load rules | [`risk.py`](../backend/planner/domain/risk.py): table-driven bands, explicit boundary conventions, load rules as data |
+| Recommend the best route, balancing risk and travel time | [`recommendation.py`](../backend/planner/domain/recommendation.py): No Travel gate, then the brief's four criteria in order; reason sentence and a "Not chosen" verdict for each route |
+| Show routes, checkpoints, risk levels, ETAs and summaries on a map | Risk-coloured route lines, checkpoint dots with hover/click cards (ETA, readings, reason), route pills with travel time, truck marker; summaries and strips in the panel |
+| Weather heatmap along the corridor with a 0–48 h slider | Corridor grid and hourly frames ([`heatmap.py`](../backend/planner/services/heatmap.py)); WebGL2 layer ([`HeatmapLayer.ts`](../frontend/src/features/map/heatmap/HeatmapLayer.ts)); timeline with play/scrub ([`ForecastBar.tsx`](../frontend/src/features/forecast/ForecastBar.tsx)) |
+| Deliverables: repository, hosted app, Loom | This repository; Vercel config in [`vercel.json`](../vercel.json); script in [`WALKTHROUGH.md`](WALKTHROUGH.md) |
+
+## Against the evaluation criteria
+
+### Routes, weather, risk and recommendation logic (40%)
+
+- **Correctness lives in plain, framework-free functions**, with tests that pin every
+  boundary of the table and the load rules.
+- **The data matches the brief literally.**
+  - Rain is `rain + showers` (liquid only, never `precipitation`, which includes snow
+    water).
+  - Snow is `snowfall` in inches.
+  - Wind is the sustained 10 m wind; gusts are shown but not scored.
+- **The time alignment is deliberate.**
+  - Wind is instantaneous, so it's interpolated between hours.
+  - Rain and snow are hourly totals, so they come from the hour the truck is driving
+    through.
+- **Miles are attributed so they sum exactly to the route length.** Midpoint coverage
+  means "Severe miles" are real miles, not "checkpoints × interval".
+- **The recommendation can be audited.** Every ranking step is shown, comparisons happen
+  at displayed precision, and each losing route gets a one-line reason.
+- **Three routes are real alternatives.** Detours are rejected for U-turns, doubling
+  back, more than 70% overlap with any kept route, or being over 1.5× slower. If
+  geography allows only two routes, the app says so.
+
+### UI, map and heatmap smoothness and performance (40%)
+
+- **Heatmap scrubbing costs one uniform change.** All frames sit in a GPU 3D texture;
+  space and time are interpolated in the shader, and risk is classified per pixel.
+- **Hot paths bypass React.**
+  - **Map-side updates.** The heatmap frame, truck marker, route-strip cursor and
+    checkpoint highlight all update through store subscriptions.
+  - **What does re-render.** Only the slider itself re-renders during playback.
+- **MapLibre is driven imperatively.**
+  - **Data updates** go through `setData` and feature-state.
+  - **Basemap style.** It is transformed once at load: recoloured, decluttered, with paint
+    transitions off.
+  - **Layer order.** Weather sits under roads and route lines under labels.
+- **Delivery is fast.**
+  - Vendor chunks are cached separately; the app's own code is 42 kB gzipped.
+  - Fonts are self-hosted.
+  - API responses are compact: geometry is simplified to about 30 m, and the heatmap is
+    one base64 byte array.
+- **Motion is purposeful.**
+  - A camera ease-out frames the new routes.
+  - Route rows slide in once per plan.
+  - Presses scale slightly.
+  - The phone sheet snaps with velocity.
+  - Reduced-motion users get instant equivalents.
+
+### Code quality (15%)
+
+- **Layers.** Domain, integrations, services and api on the backend; feature folders, a
+  typed API client, URL-as-state and a small UI store on the frontend.
+- **Strict tooling** everywhere: mypy strict, Ruff, ESLint strict type-checked, TypeScript
+  strict with `noUncheckedIndexedAccess`, Prettier. CI runs every check and test.
+- **One error envelope** for every API failure, with a friendly message per case.
+
+### Documentation and walkthrough (5%)
+
+- **README** with the rules, assumptions, API and architecture; this design record; the
+  walkthrough script.
+
+## Key decisions
+
+| Decision | Alternatives considered | Why |
+| --- | --- | --- |
+| Keyless public services (Valhalla, OSRM, Open-Meteo, Photon, OpenFreeMap) | TomTom, HERE, Mapbox with API keys | Reviewers can clone and run without sign-ups; the URLs are configurable for paid or self-hosted instances |
+| Valhalla truck costing ≤ 800 mi, OSRM beyond | One provider | Truck restrictions where possible; the public Valhalla server rejects trips over 1,500 km |
+| Generated detours for the missing options | Accepting fewer routes | The brief asks for three; quality checks keep them meaningful |
+| Sustained wind for scoring | Gusts | The literal reading of "Wind"; gusts would make most windy days No Travel. Gusts are still shown |
+| Continuous driving for ETAs | Hours-of-Service breaks | Matches the brief; HOS is listed as a known limit |
+| No Travel ranked before the brief's criteria | Treating it as Severe | A route through No Travel can't be driven as planned |
+| Classify interpolated values, not interpolated levels | Interpolating levels | Avoids false bands between calm and stormy cells |
+| Clamped Catmull-Rom spatial interpolation | Bilinear, B-spline | Round contours, exact at cells, never beyond the data (a B-spline would understate peaks) |
+| Stateless API with the trip in the URL | Persisting plans in a database | Shareable links, any instance serves any request, nothing to migrate; forecasts are refreshed on every visit |
+| MapLibre directly (no React wrapper) | react-map-gl | Full control of a custom WebGL layer under MapLibre 6; fewer moving parts |
+| Base UI primitives, native radios for segmented controls | Radix, React Aria | Accessible combobox, slider and tabs from one family; radios need no JS |
+| Custom bottom sheet | Base UI Drawer, Vaul | A permanent, non-modal map sheet; Drawer is built as a dismissable dialog and Vaul is unmaintained |

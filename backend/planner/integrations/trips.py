@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from bisect import bisect_right
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
@@ -33,19 +32,13 @@ def make_trip(
     time_s: float,
     u_turns: int = 0,
 ) -> Trip:
-    """A Trip with its shape thinned to SHAPE_TOLERANCE_MI and the timing
-    breakpoints moved onto the kept points."""
-    kept = simplify_indices(shape, SHAPE_TOLERANCE_MI)
-    remapped: list[tuple[int, float]] = []
-    for index, seconds in timing:
-        position = max(bisect_right(kept, index) - 1, 0)
-        if remapped and remapped[-1][0] == position:
-            remapped[-1] = (position, max(remapped[-1][1], seconds))
-        else:
-            remapped.append((position, seconds))
+    """A Trip with its shape thinned to SHAPE_TOLERANCE_MI. Points that timing
+    breakpoints refer to are always kept, so no breakpoint moves."""
+    kept = sorted(set(simplify_indices(shape, SHAPE_TOLERANCE_MI)) | {index for index, _ in timing})
+    position = {index: i for i, index in enumerate(kept)}
     return Trip(
         shape=[shape[i] for i in kept],
-        timing=remapped,
+        timing=[(position[index], seconds) for index, seconds in timing],
         road_miles=road_miles,
         time_s=time_s,
         u_turns=u_turns,

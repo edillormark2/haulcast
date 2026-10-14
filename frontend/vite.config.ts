@@ -12,17 +12,24 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    // MapLibre alone is ~1 MB minified (284 kB gzipped); it gets its own chunk.
+    chunkSizeWarningLimit: 1100,
     rolldownOptions: {
       output: {
-        // Keep the map engine in its own long-cached chunk.
+        // Vendor code changes rarely, so it caches apart from the app.
         codeSplitting: {
-          groups: [{ name: 'maplibre', test: /node_modules[\\/]maplibre-gl/ }],
+          groups: [
+            { name: 'maplibre', test: /node_modules[\\/]maplibre-gl/ },
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'ui', test: /node_modules[\\/](@base-ui|@floating-ui|@tanstack)[\\/]/ },
+          ],
         },
       },
     },
   },
   test: {
     environment: 'jsdom',
+    globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
   },

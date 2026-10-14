@@ -1,0 +1,32 @@
+# Runtime dependencies for the Vercel function, exported from backend/uv.lock:
+#   cd backend && uv export --no-dev --no-hashes --format requirements-txt -o ../requirements.txt
+anyio==4.15.1
+    # via httpx
+asgiref==3.12.1
+    # via django
+certifi==2026.7.22
+    # via
+    #   httpcore
+    #   httpx
+django==5.2.18
+    # via
+    #   djangorestframework
+    #   haulcast-api
+djangorestframework==3.18.3
+    # via haulcast-api
+h11==0.16.0
+    # via httpcore
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via haulcast-api
+idna==3.20
+    # via
+    #   anyio
+    #   httpx
+sqlparse==0.6.0
+    # via django
+typing-extensions==4.16.0 ; python_full_version < '3.15'
+    # via anyio
+tzdata==2026.5 ; sys_platform == 'win32'
+    # via django
