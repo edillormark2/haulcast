@@ -1,5 +1,5 @@
 """The heatmap's sampling grid: a regular lattice over the routes' bounding box,
-masked to the cells within a buffer distance of any route (the corridor)."""
+limited to the cells within a buffer distance of any route (the corridor)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from planner.domain.geometry import MILES_PER_DEGREE_LAT, Coordinate, Polyline
 
 GROWTH_FACTOR = 1.2
+SOLID_SHARE = 0.55
+"""Cells closer than this share of the buffer are fully opaque; the corridor
+fades out over the rest of the buffer."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,12 +47,20 @@ class Grid:
 @dataclass(frozen=True, slots=True)
 class Corridor:
     grid: Grid
-    mask: tuple[bool, ...]
-    """Row-major; True for cells inside the corridor."""
+    distances_mi: tuple[float, ...]
+    """Row-major distance from each cell centre to the nearest route (inf if far)."""
+    buffer_mi: float
 
     @property
     def cell_indices(self) -> list[int]:
-        return [i for i, inside in enumerate(self.mask) if inside]
+        """Cells inside the corridor, which need forecasts."""
+        return [i for i, d in enumerate(self.distances_mi) if d <= self.buffer_mi]
+
+    def weight(self, index: int) -> float:
+        """1 near a route, fading to 0 at the corridor edge."""
+        solid = SOLID_SHARE * self.buffer_mi
+        distance = self.distances_mi[index]
+        return min(1.0, max(0.0, (self.buffer_mi - distance) / (self.buffer_mi - solid)))
 
     def nearest_inside(self) -> list[int]:
         """For every cell, the index of the nearest corridor cell (itself when
@@ -100,40 +111,37 @@ def build_corridor(
             columns=math.ceil((east - west + 2 * pad_lon) / lon_step) + 1,
             rows=math.ceil((north - south + 2 * pad_lat) / lat_step) + 1,
         )
-        mask = _corridor_mask(grid, routes, buffer_mi, lon_miles_per_degree)
-        if sum(mask) <= max_cells or step >= max_step_deg:
-            return Corridor(grid=grid, mask=tuple(mask))
+        corridor = Corridor(
+            grid=grid,
+            distances_mi=_distances(grid, routes, buffer_mi, lon_miles_per_degree),
+            buffer_mi=buffer_mi,
+        )
+        if len(corridor.cell_indices) <= max_cells or step >= max_step_deg:
+            return corridor
         step = min(step * GROWTH_FACTOR, max_step_deg)
 
 
-def _corridor_mask(
+def _distances(
     grid: Grid, routes: Sequence[Polyline], buffer_mi: float, lon_miles_per_degree: float
-) -> list[bool]:
-    """Mark cells within `buffer_mi` of points sampled densely along each route."""
+) -> tuple[float, ...]:
+    """Distance from each cell to points sampled densely along the routes,
+    computed only for cells within reach of the buffer."""
     cell_mi = grid.lat_step * MILES_PER_DEGREE_LAT
     reach_rows = math.ceil(buffer_mi / cell_mi) + 1
     reach_columns = math.ceil(buffer_mi / (grid.lon_step * lon_miles_per_degree)) + 1
-    mask = [False] * grid.size
+    distances = [math.inf] * grid.size
     for route in routes:
-        sample_count = max(2, math.ceil(route.length_mi / (cell_mi / 2)) + 1)
+        sample_count = max(2, math.ceil(route.length_mi / (cell_mi / 3)) + 1)
         for k in range(sample_count):
             sample = route.point_at(route.length_mi * k / (sample_count - 1))
             row0 = round((sample.lat - grid.south) / grid.lat_step)
             column0 = round((sample.lon - grid.west) / grid.lon_step)
             for row in range(max(0, row0 - reach_rows), min(grid.rows, row0 + reach_rows + 1)):
+                dy = (grid.south + row * grid.lat_step - sample.lat) * MILES_PER_DEGREE_LAT
                 for column in range(
                     max(0, column0 - reach_columns), min(grid.columns, column0 + reach_columns + 1)
                 ):
+                    dx = (grid.west + column * grid.lon_step - sample.lon) * lon_miles_per_degree
                     index = row * grid.columns + column
-                    if not mask[index]:
-                        cell = grid.point(index)
-                        dy = (cell.lat - sample.lat) * MILES_PER_DEGREE_LAT
-                        dx = (cell.lon - sample.lon) * lon_miles_per_degree
-                        mask[index] = dx * dx + dy * dy <= buffer_mi * buffer_mi
-    return mask
-
-
-def nearest_cell(grid: Grid, point: Coordinate) -> int:
-    row = min(max(round((point.lat - grid.south) / grid.lat_step), 0), grid.rows - 1)
-    column = min(max(round((point.lon - grid.west) / grid.lon_step), 0), grid.columns - 1)
-    return row * grid.columns + column
+                    distances[index] = min(distances[index], math.hypot(dx, dy))
+    return tuple(distances)

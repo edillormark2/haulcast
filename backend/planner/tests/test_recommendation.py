@@ -44,6 +44,7 @@ def test_fewest_severe_miles_beats_a_much_faster_route() -> None:
     assert result.route_id == "B"
     assert result.comparisons[0].criterion is Criterion.SEVERE_MILES
     assert result.reason == "Route B avoids the 10 mi of Severe weather on Route A."
+    assert result.comparisons[0].verdict == "10 mi of Severe weather"
 
 
 def test_high_miles_break_a_severe_tie() -> None:
@@ -70,6 +71,7 @@ def test_travel_time_decides_when_weather_risk_ties() -> None:
     assert result.route_id == "B"
     assert result.comparisons[0].criterion is Criterion.TRAVEL_TIME
     assert result.reason == "Route B matches Route A's weather risk while being 30 min faster."
+    assert result.comparisons[0].verdict == "Same weather risk, 30 min slower"
 
 
 def test_no_travel_miles_rank_before_severe_miles() -> None:
@@ -89,6 +91,12 @@ def test_warns_when_every_route_has_no_travel_miles() -> None:
     assert result.route_id == "A"
     assert result.warning is not None
     assert result.warning.startswith("Every route crosses No Travel conditions")
+
+
+def test_travel_time_is_compared_in_whole_minutes() -> None:
+    a = route("A", 10, [(100, L)])
+    b = route("B", 10 + 20 / 3600, [(100, L)])  # 20 s slower: same displayed minute
+    assert recommend([a, b]).comparisons[0].criterion is None
 
 
 def test_float_noise_does_not_decide() -> None:

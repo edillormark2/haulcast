@@ -9,8 +9,9 @@ from typing import Any
 
 from planner.domain.geometry import simplify, trace
 from planner.domain.recommendation import CRITERIA_ORDER
-from planner.domain.risk import LOAD_RULES, SCALES, RiskLevel
-from planner.services.heatmap import Heatmap
+from planner.domain.risk import LOAD_RULES, SCALES, BandScale, Factor, RiskLevel, scales_for_load
+from planner.services.heatmap import STEP, Heatmap
+from planner.services.routing import ROUTE_COUNT
 from planner.services.trip_planner import Checkpoint, NamedPlace, RoutePlan, TripPlan
 
 DISPLAY_TOLERANCE_MI = 0.02
@@ -32,6 +33,7 @@ def present_plan(plan: TripPlan) -> dict[str, Any]:
             "load_lb": request.load_lb,
             "interval_mi": request.interval_mi,
         },
+        "thresholds": present_scales(scales_for_load(request.load_lb)),
         "routes": [
             _route(route, ranks[route.option.route_id], recommendation.route_id)
             for route in plan.routes
@@ -41,7 +43,12 @@ def present_plan(plan: TripPlan) -> dict[str, Any]:
             "ranking": list(recommendation.ranking),
             "reason": recommendation.reason,
             "comparisons": [
-                {"route_id": c.route_id, "criterion": c.criterion, "text": c.text}
+                {
+                    "route_id": c.route_id,
+                    "criterion": c.criterion,
+                    "text": c.text,
+                    "verdict": c.verdict,
+                }
                 for c in recommendation.comparisons
             ],
             "warning": recommendation.warning,
@@ -54,10 +61,34 @@ def present_plan(plan: TripPlan) -> dict[str, Any]:
             "departure": departure,
             "load_lb": request.load_lb,
         },
+        "notes": _notes(plan),
         "meta": {
             "forecast_cells": plan.forecast_cells,
             "timings_ms": plan.timings_ms,
         },
+    }
+
+
+def _notes(plan: TripPlan) -> list[str]:
+    notes = []
+    if len(plan.routes) < ROUTE_COUNT:
+        count = "one route" if len(plan.routes) == 1 else f"{len(plan.routes)} routes"
+        notes.append(
+            f"Only {count} found that differ meaningfully and take less than "
+            "1.5× the fastest time, so fewer than three options are shown."
+        )
+    return notes
+
+
+def present_scales(scales: dict[Factor, BandScale]) -> dict[str, Any]:
+    """Band lower bounds (Moderate, High, Severe, No Travel) per factor."""
+    return {
+        factor.value: {
+            "unit": scale.unit,
+            "bounds": [scale.moderate, scale.high, scale.severe, scale.no_travel],
+            "no_travel_inclusive": scale.no_travel_inclusive,
+        }
+        for factor, scale in scales.items()
     }
 
 
@@ -72,13 +103,11 @@ def present_heatmap(heatmap: Heatmap) -> dict[str, Any]:
             "columns": grid.columns,
             "rows": grid.rows,
         },
-        "start": iso(heatmap.start_ts),
-        "hours": heatmap.hours,
-        "mask": heatmap.mask_b64,
-        "layers": {
-            name: {"scale": layer.scale, "unit": layer.unit, "data": layer.data_b64}
-            for name, layer in heatmap.layers.items()
-        },
+        "start": iso(heatmap.departure_ts),
+        "frames": heatmap.frames,
+        "steps": {factor.value: step for factor, step in STEP.items()},
+        "thresholds": present_scales(heatmap.scales),
+        "data": heatmap.data_b64,
         "meta": {"forecast_cells": heatmap.forecast_cells, "timings_ms": heatmap.timings_ms},
     }
 
@@ -88,17 +117,7 @@ def present_rules() -> dict[str, Any]:
         "levels": [
             {"value": int(level), "slug": level.slug, "label": level.label} for level in RiskLevel
         ],
-        "factors": {
-            factor.value: {
-                "unit": scale.unit,
-                "moderate": scale.moderate,
-                "high": scale.high,
-                "severe": scale.severe,
-                "no_travel": scale.no_travel,
-                "no_travel_inclusive": scale.no_travel_inclusive,
-            }
-            for factor, scale in SCALES.items()
-        },
+        "factors": present_scales(SCALES),
         "load_rules": [
             {
                 "min_wind_mph": rule.min_wind_mph,

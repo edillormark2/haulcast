@@ -65,6 +65,16 @@ class BandScale:
     no_travel_inclusive: bool
     unit: str
 
+    def lower_bound(self, level: RiskLevel) -> float:
+        """The value where `level` starts (Low starts at 0)."""
+        return {
+            RiskLevel.LOW: 0.0,
+            RiskLevel.MODERATE: self.moderate,
+            RiskLevel.HIGH: self.high,
+            RiskLevel.SEVERE: self.severe,
+            RiskLevel.NO_TRAVEL: self.no_travel,
+        }[level]
+
     def classify(self, value: float) -> RiskLevel:
         if value > self.no_travel or (self.no_travel_inclusive and value == self.no_travel):
             return RiskLevel.NO_TRAVEL
@@ -110,6 +120,42 @@ LOAD_RULES: tuple[LoadRule, ...] = (
     LoadRule(45, 55, 30_000, RiskLevel.NO_TRAVEL, "45–54 mph wind with a load over 30,000 lb"),
     LoadRule(35, 45, 40_000, RiskLevel.SEVERE, "35–44 mph wind with a load over 40,000 lb"),
 )
+
+
+def wind_scale_for_load(load_lb: float) -> BandScale:
+    """The wind bands with the load rules folded in, so the heatmap and legends
+    can classify wind for this load with plain thresholds.
+
+    Each level starts at the lowest wind speed that reaches it, from the table
+    or from any load rule that applies to this load. This is exact because risk
+    never decreases as wind rises (a test checks it against `assess`).
+    """
+
+    def start(level: RiskLevel) -> float:
+        rule_starts = [
+            rule.min_wind_mph
+            for rule in LOAD_RULES
+            if rule.level >= level
+            and (rule.heavier_than_lb is None or load_lb > rule.heavier_than_lb)
+        ]
+        return min([WIND_SCALE.lower_bound(level), *rule_starts])
+
+    return BandScale(
+        moderate=start(RiskLevel.MODERATE),
+        high=start(RiskLevel.HIGH),
+        severe=start(RiskLevel.SEVERE),
+        no_travel=start(RiskLevel.NO_TRAVEL),
+        no_travel_inclusive=True,
+        unit=WIND_SCALE.unit,
+    )
+
+
+def scales_for_load(load_lb: float) -> dict[Factor, BandScale]:
+    return {
+        Factor.WIND: wind_scale_for_load(load_lb),
+        Factor.RAIN: RAIN_SCALE,
+        Factor.SNOW: SNOW_SCALE,
+    }
 
 
 @dataclass(frozen=True, slots=True)

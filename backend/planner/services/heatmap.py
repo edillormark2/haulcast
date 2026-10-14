@@ -1,5 +1,12 @@
-"""The corridor weather heatmap: hourly frames of risk, wind, rain and snow
-over a grid around the routes, packed for upload as WebGL textures."""
+"""The corridor weather heatmap: hourly frames of wind, rain and snow over a
+grid around the routes, packed as one RGBA texture for WebGL.
+
+Frame k shows the weather at departure + k hours, read with the same function
+that reads checkpoint weather, so the heatmap and the checkpoints always agree
+at whole slider hours. Risk is not baked in: the client classifies the
+interpolated values with the thresholds sent alongside, which avoids the false
+bands that interpolating risk levels would draw.
+"""
 
 from __future__ import annotations
 
@@ -10,53 +17,30 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from planner.domain.corridor import Corridor, build_corridor
+from planner.domain.forecast import HOUR_S
 from planner.domain.geometry import Coordinate, Polyline
-from planner.domain.risk import Conditions, assess
+from planner.domain.risk import BandScale, Factor, scales_for_load
 from planner.services.forecasts import ForecastWindow, fetch_forecasts
 
 SLIDER_HOURS = 48
-FRAME_COUNT = SLIDER_HOURS + 2
-"""Frames start at the top of the departure hour, so one extra frame keeps
-"+48 h" inside the data for any departure minute."""
-CORRIDOR_BUFFER_MI = 30
+FRAME_COUNT = SLIDER_HOURS + 1
+CORRIDOR_BUFFER_MI = 35
 MAX_FORECAST_CELLS = 220
-"""Keeps a heatmap well inside Open-Meteo's free 600 calls/minute."""
+"""Keeps one heatmap well inside Open-Meteo's free 600 calls/minute."""
 MIN_STEP_DEG, MAX_STEP_DEG = 0.1, 0.6
 
-
-@dataclass(frozen=True, slots=True)
-class LayerSpec:
-    scale: float
-    """Value represented by one byte step."""
-    unit: str
-
-    def quantize(self, value: float) -> int:
-        return min(255, max(0, round(value / self.scale)))
-
-
-LAYER_SPECS: dict[str, LayerSpec] = {
-    "risk": LayerSpec(1, "level"),
-    "wind": LayerSpec(0.5, "mph"),
-    "rain": LayerSpec(0.01, "in/hr"),
-    "snow": LayerSpec(0.02, "in/hr"),
-}
-
-
-@dataclass(frozen=True, slots=True)
-class Layer:
-    scale: float
-    unit: str
-    data_b64: str
-    """`FRAME_COUNT` row-major frames of grid bytes, frame after frame."""
+STEP: dict[Factor, float] = {Factor.WIND: 0.5, Factor.RAIN: 0.01, Factor.SNOW: 0.02}
+"""Value of one byte step per channel. Every risk threshold lands on a whole byte."""
 
 
 @dataclass(frozen=True, slots=True)
 class Heatmap:
     corridor: Corridor
-    start_ts: int
-    hours: int
-    mask_b64: str
-    layers: dict[str, Layer]
+    departure_ts: float
+    frames: int
+    data_b64: str
+    """`frames` × rows × columns × RGBA bytes: wind, rain, snow, corridor weight."""
+    scales: dict[Factor, BandScale]
     forecast_cells: int
     timings_ms: dict[str, int]
 
@@ -73,40 +57,43 @@ def build_heatmap(
         max_step_deg=MAX_STEP_DEG,
     )
     grid, cells = corridor.grid, corridor.cell_indices
-    window = ForecastWindow.covering(departure.timestamp(), FRAME_COUNT)
-    forecasts = fetch_forecasts((grid.point(i) for i in cells), window)
+    departure_ts = departure.timestamp()
+    forecasts = fetch_forecasts(
+        (grid.point(i) for i in cells), ForecastWindow.covering(departure_ts, SLIDER_HOURS)
+    )
     fetched = time.perf_counter()
 
-    frames = {name: bytearray(FRAME_COUNT * grid.size) for name in LAYER_SPECS}
+    data = bytearray(FRAME_COUNT * grid.size * 4)
     for cell in cells:
         series = forecasts[grid.point(cell)]
-        for hour in range(FRAME_COUNT):
-            conditions = series.conditions_at_hour(hour)
-            values = _layer_values(conditions, load_lb)
-            for name, value in values.items():
-                frames[name][hour * grid.size + cell] = LAYER_SPECS[name].quantize(value)
+        for frame in range(FRAME_COUNT):
+            conditions = series.conditions_at(departure_ts + frame * HOUR_S)
+            offset = (frame * grid.size + cell) * 4
+            data[offset] = _quantize(conditions.wind_mph, STEP[Factor.WIND])
+            data[offset + 1] = _quantize(conditions.rain_in_hr, STEP[Factor.RAIN])
+            data[offset + 2] = _quantize(conditions.snow_in_hr, STEP[Factor.SNOW])
 
-    # Pad cells outside the corridor with their nearest inside value so that
-    # bilinear filtering at the corridor edge doesn't fade toward zero; the
-    # mask, not the data, draws the edge.
+    # Alpha carries the corridor weight. Cells outside the corridor copy their
+    # nearest inside neighbour's weather so bilinear filtering at the edge
+    # doesn't fade the colours toward calm; the weight draws the edge instead.
+    weights = [round(corridor.weight(i) * 255) for i in range(grid.size)]
     nearest = corridor.nearest_inside()
-    outside = [(cell, source) for cell, source in enumerate(nearest) if source != cell]
-    for data in frames.values():
-        for hour in range(FRAME_COUNT):
-            base = hour * grid.size
-            for cell, source in outside:
-                data[base + cell] = data[base + source]
+    for frame in range(FRAME_COUNT):
+        base = frame * grid.size
+        for cell, source in enumerate(nearest):
+            offset = (base + cell) * 4
+            if source != cell and source >= 0:
+                source_offset = (base + source) * 4
+                data[offset : offset + 3] = data[source_offset : source_offset + 3]
+            data[offset + 3] = weights[cell]
 
     finished = time.perf_counter()
     return Heatmap(
         corridor=corridor,
-        start_ts=window.start,
-        hours=FRAME_COUNT,
-        mask_b64=_b64(bytes(255 if inside else 0 for inside in corridor.mask)),
-        layers={
-            name: Layer(scale=spec.scale, unit=spec.unit, data_b64=_b64(bytes(frames[name])))
-            for name, spec in LAYER_SPECS.items()
-        },
+        departure_ts=departure_ts,
+        frames=FRAME_COUNT,
+        data_b64=base64.b64encode(bytes(data)).decode("ascii"),
+        scales=scales_for_load(load_lb),
         forecast_cells=forecasts.cell_count,
         timings_ms={
             "weather": round((fetched - started) * 1000),
@@ -115,14 +102,5 @@ def build_heatmap(
     )
 
 
-def _layer_values(conditions: Conditions, load_lb: int) -> dict[str, float]:
-    return {
-        "risk": assess(conditions, load_lb).level,
-        "wind": conditions.wind_mph,
-        "rain": conditions.rain_in_hr,
-        "snow": conditions.snow_in_hr,
-    }
-
-
-def _b64(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")
+def _quantize(value: float, step: float) -> int:
+    return min(255, max(0, round(value / step)))

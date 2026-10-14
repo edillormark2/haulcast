@@ -40,12 +40,16 @@ VALHALLA_MAX_DIRECT_MI = 800
 1,500 km limit for via-point detours."""
 MAX_SLOWDOWN = 1.5
 """An option may take at most 1.5× the fastest option's time."""
-DUPLICATE_OVERLAP = 0.97
-DETOUR_MAX_OVERLAP = 0.8
-DETOUR_OFFSET_SHARE = 0.25
-"""Via points sit a quarter of the straight-line distance off the route,"""
-MIN_DETOUR_OFFSET_MI, MAX_DETOUR_OFFSET_MI = 15.0, 150.0
-"""within these bounds."""
+DUPLICATE_OVERLAP = 0.9
+DETOUR_MAX_OVERLAP = 0.7
+"""A detour must leave at least 30% of its length off every other option."""
+DETOUR_OFFSET_SHARES = (0.25, 0.15)
+"""Via points sit this share of the straight-line distance off the route,"""
+MIN_DETOUR_OFFSET_MI, MAX_DETOUR_OFFSET_MI = 37.0, 217.0
+"""within these bounds (60–350 km)."""
+MAX_BACKTRACK = 0.03
+"""Share of a route allowed to double back on itself before a detour is rejected."""
+PATH_LIMIT_MARGIN = 0.97
 MAJOR_ROAD_SHARE = 0.05
 OVERLAP_CELL_DEG = 0.02
 OVERLAP_SAMPLE_MI = 0.5
@@ -135,10 +139,13 @@ def _choose_router(
     gross_weight_lb = load_lb + TARE_WEIGHT_LB
 
     def truck_router(points: Sequence[Coordinate], alternates: int) -> list[Trip]:
-        if sum(haversine_mi(a, b) for a, b in pairwise(points)) > valhalla.MAX_PATH_MI:
+        if _straight_path_mi(points) > PATH_LIMIT_MARGIN * valhalla.MAX_PATH_MI:
             raise NoRouteError("Detour exceeds the routing server's distance limit")
+        endpoints = (0, len(points) - 1)
         waypoints = [
-            Waypoint(point, "break" if i in (0, len(points) - 1) else "through")
+            Waypoint(point)
+            if i in endpoints
+            else Waypoint(point, kind="through", major_roads_only=True)
             for i, point in enumerate(points)
         ]
         return valhalla.route(waypoints, gross_weight_lb=gross_weight_lb, alternates=alternates)
@@ -153,26 +160,28 @@ def _road_router(points: Sequence[Coordinate], alternatives: int) -> list[Trip]:
 def _detours(
     origin: Coordinate, destination: Coordinate, existing: Sequence[_Candidate], router: Router
 ) -> list[_Candidate]:
+    """Up to the missing number of extra options, each routed through a via
+    point beside the fastest route's midpoint. Candidates that are slow, too
+    similar to a kept route, or that U-turn or double back are rejected; with
+    no good candidate the trip simply has fewer options."""
     fastest = min(existing, key=lambda c: c.duration_s)
-    midpoint = fastest.line.point_at(fastest.line.length_mi / 2)
-    heading = initial_bearing(origin, destination)
-    offset = min(
-        max(haversine_mi(origin, destination) * DETOUR_OFFSET_SHARE, MIN_DETOUR_OFFSET_MI),
-        MAX_DETOUR_OFFSET_MI,
+    line = fastest.line
+    midpoint = line.point_at(line.length_mi / 2)
+    # Offset perpendicular to the route's own direction around its midpoint.
+    heading = initial_bearing(
+        line.point_at(line.length_mi * 0.4), line.point_at(line.length_mi * 0.6)
     )
+    direct = haversine_mi(origin, destination)
 
     def clearance(via: Coordinate) -> float:
-        """Distance from a via point to the nearest existing option's midpoint."""
         return min(haversine_mi(via, c.line.point_at(c.line.length_mi / 2)) for c in existing)
 
-    attempts = [
-        destination_point(midpoint, heading + side, offset * scale)
-        for scale in (1.0, 0.5)
-        for side in sorted(
-            (-90, 90),
-            key=lambda s: -clearance(destination_point(midpoint, heading + s, offset * scale)),
-        )
-    ]
+    attempts = []
+    for share in DETOUR_OFFSET_SHARES:
+        offset = min(max(direct * share, MIN_DETOUR_OFFSET_MI), MAX_DETOUR_OFFSET_MI)
+        sides = [destination_point(midpoint, heading + side, offset) for side in (-90, 90)]
+        attempts += sorted(sides, key=lambda via: -clearance(via))
+
     found: list[_Candidate] = []
     for via in attempts:
         if len(existing) + len(found) >= ROUTE_COUNT:
@@ -182,18 +191,40 @@ def _detours(
         except NoRouteError as exc:
             logger.info("detour via %s: no route (%s)", via, exc)
             continue
-        too_slow = candidate.duration_s > MAX_SLOWDOWN * fastest.duration_s
-        too_similar = _overlap(candidate, [*existing, *found]) > DETOUR_MAX_OVERLAP
+        problem = _detour_problem(candidate, fastest, [*existing, *found])
         logger.info(
-            "detour via %s: %.1f h, too_slow=%s too_similar=%s",
-            via,
-            candidate.duration_s / 3600,
-            too_slow,
-            too_similar,
+            "detour via %s: %.1f h, %s", via, candidate.duration_s / 3600, problem or "kept"
         )
-        if not (too_slow or too_similar):
+        if problem is None:
             found.append(candidate)
     return found
+
+
+def _detour_problem(
+    candidate: _Candidate, fastest: _Candidate, kept: Sequence[_Candidate]
+) -> str | None:
+    if candidate.duration_s > MAX_SLOWDOWN * fastest.duration_s:
+        return "too slow"
+    if candidate.trip.u_turns:
+        return "U-turn"
+    if _backtrack_share(candidate.line) > MAX_BACKTRACK:
+        return "doubles back"
+    if any(_overlap(candidate, [other]) > DETOUR_MAX_OVERLAP for other in kept):
+        return "too similar"
+    return None
+
+
+def _backtrack_share(line: Polyline) -> float:
+    """Share of the route that re-enters ground it already covered, e.g. an
+    out-and-back spur to reach a via point."""
+    cells = _cells(line)
+    last_seen: dict[tuple[int, int], int] = {}
+    returns = 0
+    for position, cell in enumerate(cells):
+        if cell in last_seen and position - last_seen[cell] > 3:
+            returns += 1
+        last_seen[cell] = position
+    return returns / len(cells)
 
 
 def _travel_time_profile(candidate: _Candidate) -> TravelTimeProfile:
@@ -242,3 +273,7 @@ def _cells(line: Polyline) -> list[tuple[int, int]]:
     count = max(2, math.ceil(line.length_mi / OVERLAP_SAMPLE_MI) + 1)
     points = (line.point_at(line.length_mi * i / (count - 1)) for i in range(count))
     return [(round(p.lat / OVERLAP_CELL_DEG), round(p.lon / OVERLAP_CELL_DEG)) for p in points]
+
+
+def _straight_path_mi(points: Sequence[Coordinate]) -> float:
+    return sum(haversine_mi(a, b) for a, b in pairwise(points))

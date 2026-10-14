@@ -11,6 +11,7 @@ from planner.domain.risk import (
     RiskLevel,
     assess,
     describe,
+    wind_scale_for_load,
 )
 
 L, M, H, S, NT = (
@@ -161,3 +162,29 @@ def test_levels_are_ordered_and_labelled() -> None:
         "Severe",
         "No Travel",
     ]
+
+
+@pytest.mark.parametrize(
+    ("load", "bounds"),
+    [
+        (20_000, (25, 35, 45, 55)),
+        (30_000, (25, 35, 45, 55)),
+        (30_001, (25, 35, 45, 45)),
+        (40_000, (25, 35, 45, 45)),
+        (40_001, (25, 35, 35, 45)),
+    ],
+)
+def test_wind_scale_folds_in_the_load_rules(
+    load: float, bounds: tuple[float, float, float, float]
+) -> None:
+    scale = wind_scale_for_load(load)
+    assert (scale.moderate, scale.high, scale.severe, scale.no_travel) == bounds
+
+
+@pytest.mark.parametrize("load", [0, 30_000, 30_001, 40_000, 40_001, 80_000])
+def test_folded_wind_scale_agrees_with_assess_at_every_tenth_of_a_mph(load: float) -> None:
+    scale = wind_scale_for_load(load)
+    for tenths in range(0, 900):
+        wind = tenths / 10
+        expected = assess(calm(wind_mph=wind), load_lb=load).factor_levels[Factor.WIND]
+        assert scale.classify(wind) is expected, (wind, load)

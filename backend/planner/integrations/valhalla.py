@@ -22,6 +22,7 @@ MAX_PATH_MI = 1_500 / 1.609344
 """The public server's limit on the summed straight-line distance between
 consecutive locations."""
 KG_PER_LB = 0.45359237
+U_TURN_MANEUVERS = frozenset({12, 13})
 
 _throttle = HostThrottle(min_interval_s=1.1)
 
@@ -35,6 +36,8 @@ class Waypoint:
     coordinate: Coordinate
     kind: Literal["break", "through"] = "break"
     """`through` passes the point without stopping (no extra leg)."""
+    major_roads_only: bool = False
+    """Snap to a primary road or bigger, never a ramp: keeps detours on truck roads."""
 
 
 def route(
@@ -43,9 +46,7 @@ def route(
     """The best truck route through the waypoints, then up to `alternates`
     alternatives (Valhalla may return fewer)."""
     body: dict[str, Any] = {
-        "locations": [
-            {"lat": w.coordinate.lat, "lon": w.coordinate.lon, "type": w.kind} for w in waypoints
-        ],
+        "locations": [_location(w) for w in waypoints],
         "costing": "truck",
         "costing_options": {"truck": {"weight": round(gross_weight_lb * KG_PER_LB / 1000, 2)}},
         "units": "miles",
@@ -69,11 +70,24 @@ def route(
     return [_parse_trip(trip) for trip in trips]
 
 
+def _location(waypoint: Waypoint) -> dict[str, Any]:
+    location: dict[str, Any] = {
+        "lat": waypoint.coordinate.lat,
+        "lon": waypoint.coordinate.lon,
+        "type": waypoint.kind,
+    }
+    if waypoint.major_roads_only:
+        location["search_filter"] = {"min_road_class": "primary", "exclude_ramp": True}
+        location["search_cutoff"] = 100_000
+    return location
+
+
 def _parse_trip(trip: dict[str, Any]) -> Trip:
     shape: list[Coordinate] = []
     timing: list[tuple[int, float]] = []
     roads: list[tuple[list[str], float]] = []
     elapsed = 0.0
+    u_turns = 0
     for leg in trip["legs"]:
         offset = max(len(shape) - 1, 0)  # consecutive legs share their joining point
         leg_shape = decode_polyline(leg["shape"], precision=6)
@@ -82,5 +96,6 @@ def _parse_trip(trip: dict[str, Any]) -> Trip:
             timing.append((offset + maneuver["begin_shape_index"], elapsed))
             elapsed += float(maneuver.get("time", 0))
             roads.append((maneuver.get("street_names", []), float(maneuver.get("length", 0))))
+            u_turns += maneuver.get("type") in U_TURN_MANEUVERS
     timing.append((len(shape) - 1, elapsed))
-    return make_trip(shape, timing, tally_highways(roads), elapsed)
+    return make_trip(shape, timing, tally_highways(roads), elapsed, u_turns)

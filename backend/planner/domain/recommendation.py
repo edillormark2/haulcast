@@ -7,8 +7,9 @@ The brief doesn't rank No Travel because it isn't a degree of risk but a
 stop: any route with No Travel miles can't be driven as planned. So No Travel
 miles are compared first, ahead of the brief's four criteria.
 
-Miles are compared at 0.1 mi and average risk at 0.01 so that floating-point
-noise never decides a recommendation.
+Values are compared at the precision the UI shows (0.1 mi, 0.01 average risk,
+whole minutes), so floating-point noise never decides a recommendation and the
+explanation never contradicts the numbers on screen.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ def criteria_values(candidate: RouteCandidate) -> tuple[float, ...]:
         round(exposure.miles(RiskLevel.SEVERE), 1),
         round(exposure.miles(RiskLevel.HIGH), 1),
         round(exposure.average_risk, 2),
-        round(candidate.duration_s),
+        round(candidate.duration_s / 60),
     )
 
 
@@ -82,6 +83,9 @@ class Comparison:
     criterion: Criterion | None
     """The first criterion that separates the two (None when they tie)."""
     text: str
+    """Completes "<recommended route> …", e.g. "avoids the 25 mi of Severe weather on Route A"."""
+    verdict: str
+    """Why the other route lost, from its own point of view, e.g. "25 mi of Severe weather"."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,32 +129,39 @@ def _compare(best: RouteCandidate, other: RouteCandidate) -> Comparison:
     criterion = _deciding_criterion(best, other)
     mine, theirs, name = best.exposure, other.exposure, other.name
 
-    def exposure_clause(level: RiskLevel, weather: str) -> str:
+    def exposure(level: RiskLevel, weather: str) -> tuple[str, str]:
         ours, their = _miles_pair(mine.miles(level), theirs.miles(level))
         if mine.miles(level) == 0:
-            return f"avoids the {their} of {weather} on {name}"
-        return f"has less {weather} than {name} ({ours} vs {their})"
+            return f"avoids the {their} of {weather} on {name}", f"{their} of {weather}"
+        return (
+            f"has less {weather} than {name} ({ours} vs {their})",
+            f"{their} of {weather}, vs {ours} on {best.name}",
+        )
 
     match criterion:
         case None:
             text = f"ties with {name} on weather risk and travel time"
+            verdict = f"Ties with {best.name}"
         case Criterion.NO_TRAVEL_MILES:
-            text = exposure_clause(RiskLevel.NO_TRAVEL, "No Travel conditions")
+            text, verdict = exposure(RiskLevel.NO_TRAVEL, "No Travel conditions")
         case Criterion.SEVERE_MILES:
-            text = exposure_clause(RiskLevel.SEVERE, "Severe weather")
+            text, verdict = exposure(RiskLevel.SEVERE, "Severe weather")
         case Criterion.HIGH_MILES:
-            text = exposure_clause(RiskLevel.HIGH, "High-risk weather")
+            text, verdict = exposure(RiskLevel.HIGH, "High-risk weather")
         case Criterion.AVERAGE_RISK:
             text = (
                 f"has lower average risk than {name} "
                 f"({mine.average_risk:.2f} vs {theirs.average_risk:.2f})"
             )
+            verdict = f"Higher average risk: {theirs.average_risk:.2f} vs {mine.average_risk:.2f}"
         case Criterion.TRAVEL_TIME:
-            saved = format_duration(other.duration_s - best.duration_s)
-            text = f"matches {name}'s weather risk while being {saved} faster"
+            slower = format_duration(other.duration_s - best.duration_s)
+            text = f"matches {name}'s weather risk while being {slower} faster"
+            verdict = f"Same weather risk, {slower} slower"
         case _:
             assert_never(criterion)
-    return Comparison(route_id=other.route_id, criterion=criterion, text=text)
+    verdict = verdict[0].upper() + verdict[1:]
+    return Comparison(route_id=other.route_id, criterion=criterion, text=text, verdict=verdict)
 
 
 def _reason(

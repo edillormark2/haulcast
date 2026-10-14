@@ -66,12 +66,10 @@ def _parse_route(route: dict[str, Any]) -> Trip:
     if timing[-1][0] != len(shape) - 1:
         timing.append((len(shape) - 1, elapsed))
 
-    roads = [
-        (_names(step), float(step["distance"]) / METERS_PER_MILE)
-        for leg in route["legs"]
-        for step in leg["steps"]
-    ]
-    return make_trip(shape, timing, tally_highways(roads), elapsed)
+    steps = [step for leg in route["legs"] for step in leg["steps"]]
+    roads = [(_names(step), float(step["distance"]) / METERS_PER_MILE) for step in steps]
+    u_turns = sum(step.get("maneuver", {}).get("modifier") == "uturn" for step in steps)
+    return make_trip(shape, timing, tally_highways(roads), elapsed, u_turns)
 
 
 def _names(step: dict[str, Any]) -> list[str]:

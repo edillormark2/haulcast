@@ -23,6 +23,7 @@ class Trip:
     road_miles: dict[str, float]
     """Miles driven on each numbered highway, e.g. {"I-80": 812.4}."""
     time_s: float
+    u_turns: int = 0
 
 
 def make_trip(
@@ -30,6 +31,7 @@ def make_trip(
     timing: Sequence[tuple[int, float]],
     road_miles: dict[str, float],
     time_s: float,
+    u_turns: int = 0,
 ) -> Trip:
     """A Trip with its shape thinned to SHAPE_TOLERANCE_MI and the timing
     breakpoints moved onto the kept points."""
@@ -42,7 +44,11 @@ def make_trip(
         else:
             remapped.append((position, seconds))
     return Trip(
-        shape=[shape[i] for i in kept], timing=remapped, road_miles=road_miles, time_s=time_s
+        shape=[shape[i] for i in kept],
+        timing=remapped,
+        road_miles=road_miles,
+        time_s=time_s,
+        u_turns=u_turns,
     )
 
 
