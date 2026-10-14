@@ -326,8 +326,9 @@ All responses are JSON; errors share one envelope:
   Chromium with every request stubbed, the basemap style included: it plans the Dallas to
   Atlanta sample trip, checks the URL, the recommendation and the three routes, opens Route
   C's checkpoints, steps and plays the forecast, and fails on any console error
-  ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). SwiftShader gives the map WebGL 2 on CI;
-  where WebGL is missing, the test checks the map's fallback message instead.
+  ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). Chromium runs with SwiftShader, so the map
+  gets WebGL 2 without a GPU; where WebGL is still missing, the test checks the map's fallback
+  message instead.
 - **Static checks run strict.** Ruff and mypy (strict) on the backend; ESLint
   (`strictTypeChecked`), TypeScript strict and Prettier on the frontend. CI runs all of it
   ([`ci.yml`](.github/workflows/ci.yml)).
