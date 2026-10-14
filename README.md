@@ -1,5 +1,7 @@
 # Haulcast: weather-aware truck routing
 
+**Live app: [haulcast.vercel.app](https://haulcast.vercel.app)**
+
 A React + Django app that helps a truck driver choose the safest route. It finds three
 route options, reads the forecast at every checkpoint **for the moment the truck will be
 there**, scores wind, rain and snow against the brief's risk and load rules, and recommends
