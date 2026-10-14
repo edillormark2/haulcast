@@ -18,7 +18,8 @@ from planner.integrations.http import UpstreamError, request_json
 
 SERVICE = "Open-Meteo"
 HOURLY_VARIABLES = ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall")
-MAX_LOCATIONS_PER_REQUEST = 100
+MAX_LOCATIONS_PER_REQUEST = 150
+"""About a 2.5 KB URL; Open-Meteo rejects URLs past ~8 KB."""
 
 
 def fetch_hourly(points: Sequence[Coordinate], start: int, end: int) -> list[HourlySeries]:

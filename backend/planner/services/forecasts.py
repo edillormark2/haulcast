@@ -21,7 +21,8 @@ SNAP_DEGREES = 0.05
 than the forecast models' own grids, so nearby checkpoints share one lookup."""
 CACHE_TTL_S = 30 * 60
 """Forecast models update hourly; half an hour keeps lookups reasonably fresh."""
-PARALLEL_REQUESTS = 4
+PARALLEL_REQUESTS = 2
+"""Open-Meteo slows down sharply when one client opens many requests at once."""
 
 
 @dataclass(frozen=True, slots=True)
