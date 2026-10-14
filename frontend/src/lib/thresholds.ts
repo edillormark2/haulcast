@@ -1,7 +1,7 @@
 import type { Factor, Thresholds } from '../api/types'
 import { RISK_LEVELS, type RiskLevel } from './risk'
 
-export const FACTORS: readonly Factor[] = ['wind', 'rain', 'snow']
+const FACTORS: readonly Factor[] = ['wind', 'rain', 'snow']
 
 /** Risk level of one reading against its factor's bands. */
 export function levelFor(value: number, thresholds: Thresholds): RiskLevel {

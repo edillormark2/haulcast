@@ -22,9 +22,3 @@ export const RISK: Record<RiskLevel, RiskStyle> = {
 export function riskAtLeast(level: RiskLevel, floor: RiskLevel): boolean {
   return RISK[level].score >= RISK[floor].score
 }
-
-/** Describe an average risk score (0–4) in words. */
-export function describeAverageRisk(score: number): string {
-  const nearest = RISK_LEVELS[Math.min(4, Math.max(0, Math.round(score)))] ?? 'low'
-  return RISK[nearest].label
-}

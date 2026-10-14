@@ -1,10 +1,5 @@
 export const HOUR_MS = 3_600_000
 
-/** Hours between departure and a moment. */
-export function hoursSince(departureMs: number, timeMs: number): number {
-  return (timeMs - departureMs) / HOUR_MS
-}
-
 /**
  * A `datetime-local` value ("2026-10-16T06:00") for a moment, in the
  * viewer's time zone.

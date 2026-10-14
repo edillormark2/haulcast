@@ -16,6 +16,7 @@ import { useMediaQuery, useViewportHeight } from '../lib/useMediaQuery'
 import { useTripParams } from '../state/tripParams'
 import { useUiStore } from '../state/uiStore'
 import { BottomSheet } from '../ui/BottomSheet'
+import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { formatDuration, formatMiles } from '../lib/format'
 import { Logo, LogoMark } from '../ui/Logo'
 
@@ -71,23 +72,25 @@ export function App() {
 
   return (
     <main className="relative h-dvh w-full overflow-hidden">
-      <MapView>
-        {plan && (
-          <>
-            <RouteLayers routes={plan.routes} />
-            <HeatmapController data={heatmapQuery.data} />
-            {selectedRoute && <TruckMarker route={selectedRoute} departureMs={departureMs} />}
-            <RouteLabels routes={plan.routes} />
-            <MapInteractions
-              routes={plan.routes}
-              heatmap={heatmapQuery.data}
-              thresholds={plan.thresholds}
-              departureMs={departureMs}
-            />
-            <CameraController routes={plan.routes} insets={insets} />
-          </>
-        )}
-      </MapView>
+      <ErrorBoundary fallback={<MapUnavailable />}>
+        <MapView>
+          {plan && (
+            <>
+              <RouteLayers routes={plan.routes} />
+              <HeatmapController data={heatmapQuery.data} />
+              {selectedRoute && <TruckMarker route={selectedRoute} departureMs={departureMs} />}
+              <RouteLabels routes={plan.routes} />
+              <MapInteractions
+                routes={plan.routes}
+                heatmap={heatmapQuery.data}
+                thresholds={plan.thresholds}
+                departureMs={departureMs}
+              />
+              <CameraController routes={plan.routes} insets={insets} />
+            </>
+          )}
+        </MapView>
+      </ErrorBoundary>
 
       {desktop ? (
         <>
@@ -122,6 +125,17 @@ export function App() {
         </>
       )}
     </main>
+  )
+}
+
+function MapUnavailable() {
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-canvas p-8 text-center text-sm text-fg-muted">
+      <p className="max-w-xs">
+        The map hit a problem and stopped. Routes, risks and checkpoints are still in the panel;
+        reloading the page brings the map back.
+      </p>
+    </div>
   )
 }
 

@@ -1,7 +1,5 @@
-import type { Factor, HeatmapMetric, HeatmapPayload, Thresholds } from '../api/types'
+import type { Factor, HeatmapPayload, Thresholds } from '../api/types'
 import { HOUR_MS } from './time'
-
-export const HEATMAP_METRICS: readonly HeatmapMetric[] = ['risk', 'wind', 'rain', 'snow']
 
 export interface HeatmapGrid {
   west: number
