@@ -1,0 +1,34 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+
+# Env & local tooling
+.env
+.env.*
+!.env.example
+.vercel/
+.claude/settings.local.json
+
+# The assessment brief stays local
+*.pdf
