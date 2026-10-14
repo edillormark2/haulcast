@@ -70,6 +70,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
 | `npm test` | `frontend/` | 41 tests: thresholds, heatmap sampling, geometry, URL state, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
+| `npm run test:e2e` | `frontend/` | Playwright smoke test in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
 ## How a plan is made
 
@@ -321,6 +322,12 @@ All responses are JSON; errors share one envelope:
     floating-point noise never decides.
 - **The API is tested end to end** against faked Valhalla and Open-Meteo: ranking, risk
   sections, the heatmap byte layout, validation and upstream-failure mapping.
+- **A browser smoke test runs the main flow.** Playwright drives the production build in
+  Chromium with every request stubbed, the basemap style included: it plans the Dallas to
+  Atlanta sample trip, checks the URL, the recommendation and the three routes, opens Route
+  C's checkpoints, steps and plays the forecast, and fails on any console error
+  ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). SwiftShader gives the map WebGL 2 on CI;
+  where WebGL is missing, the test checks the map's fallback message instead.
 - **Static checks run strict.** Ruff and mypy (strict) on the backend; ESLint
   (`strictTypeChecked`), TypeScript strict and Prettier on the frontend. CI runs all of it
   ([`ci.yml`](.github/workflows/ci.yml)).

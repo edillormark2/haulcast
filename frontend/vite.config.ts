@@ -28,6 +28,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Unit tests only: Playwright runs the browser tests in e2e/.
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
