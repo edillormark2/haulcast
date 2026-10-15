@@ -43,3 +43,14 @@ test('dragging the handle still moves the sheet', async ({ page }) => {
   await page.mouse.up()
   await expect(handle).toHaveAttribute('aria-label', 'Collapse panel')
 })
+
+test('the sheet header offers the demo before a trip is planned', async ({ page }) => {
+  await stubNetwork(page)
+  await page.goto('/')
+  const sheet = page.getByRole('region', { name: 'Trip planner' })
+  await sheet.getByRole('button', { name: /^Demo/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'How Haulcast works' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close the demo' }).click()
+  await expect(dialog).toBeHidden()
+})

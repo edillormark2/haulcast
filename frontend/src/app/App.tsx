@@ -3,6 +3,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react'
 
 import { busyRetry, useHeatmap, usePlan } from '../api/queries'
 import type { Plan, TripRequest } from '../api/types'
+import { DemoButton } from '../features/demo/DemoButton'
+import { DemoDialog } from '../features/demo/DemoDialog'
 import { ForecastBar } from '../features/forecast/ForecastBar'
 import { useForecastClock } from '../features/forecast/useForecastClock'
 import { type Insets, MapLoading } from '../features/map/MapStatus'
@@ -139,6 +141,7 @@ export function App() {
           </BottomSheet>
         </>
       )}
+      <DemoDialog />
     </main>
   )
 }
@@ -188,7 +191,10 @@ function SheetHeader({ plan, status }: { plan: Plan | undefined; status: string 
       ) : (
         <div className="flex items-center gap-2.5">
           <LogoMark size={26} />
-          <p className="text-sm font-semibold text-fg">Plan a weather-safe truck route</p>
+          <p className="min-w-0 truncate text-sm font-semibold text-fg">
+            Plan a weather-safe truck route
+          </p>
+          <DemoButton tone="light" compact className="ml-auto" />
         </div>
       )}
     </div>
@@ -200,7 +206,12 @@ function PanelHeader() {
   return (
     <header className="relative shrink-0 bg-ink px-5 pt-4 pb-7">
       <h1 className="sr-only">Haulcast: weather-aware truck routing</h1>
-      <Logo />
+      <div className="flex items-center justify-between gap-3">
+        <div className="shrink-0">
+          <Logo />
+        </div>
+        <DemoButton tone="dark" />
+      </div>
       <svg
         aria-hidden
         className="absolute inset-x-0 -bottom-px h-4 w-full text-surface"

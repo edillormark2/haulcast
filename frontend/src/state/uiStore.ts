@@ -42,6 +42,8 @@ interface UiState {
   panelTab: PanelTab
   /** Bottom sheet position on phones: 0 peek, 1 half, 2 full. */
   sheetSnap: number
+  /** The narrated demo video, shown in a dialog over the app. */
+  demoOpen: boolean
 
   selectRoute: (routeId: string | null) => void
   hoverRoute: (routeId: string | null) => void
@@ -59,6 +61,8 @@ interface UiState {
   toggleHeatmap: () => void
   setPanelTab: (tab: PanelTab) => void
   setSheetSnap: (snap: number) => void
+  openDemo: () => void
+  closeDemo: () => void
   resetForNewPlan: (recommendedRouteId: string) => void
   /** Back to an empty planner, ready for a new trip. */
   clearPlan: () => void
@@ -87,6 +91,7 @@ export const useUiStore = create<UiState>()((set) => ({
   heatmapVisible: true,
   panelTab: 'routes',
   sheetSnap: 1,
+  demoOpen: false,
 
   selectRoute: (routeId) =>
     set((state) => ({ ...selection(state, routeId), focusedCheckpoint: null })),
@@ -123,6 +128,9 @@ export const useUiStore = create<UiState>()((set) => ({
   toggleHeatmap: () => set((state) => ({ heatmapVisible: !state.heatmapVisible })),
   setPanelTab: (panelTab) => set({ panelTab }),
   setSheetSnap: (sheetSnap) => set({ sheetSnap }),
+  // Watching the demo pauses a playing trip, so the two don't run at once.
+  openDemo: () => set({ demoOpen: true, playing: false }),
+  closeDemo: () => set({ demoOpen: false }),
   resetForNewPlan: (recommendedRouteId) =>
     set({
       selectedRouteId: recommendedRouteId,

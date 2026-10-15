@@ -1,6 +1,7 @@
 # Haulcast: weather-aware truck routing
 
-**Live app: [haulcast.vercel.app](https://haulcast.vercel.app)**
+**Live app: [haulcast.vercel.app](https://haulcast.vercel.app)** · a 1:28 narrated tour plays from
+**Watch demo** in the app's header.
 
 A React + Django app that helps a truck driver choose the safest route. It finds three
 route options, reads the forecast at every checkpoint **for the moment the truck will be
@@ -76,7 +77,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 | --- | --- | --- |
 | `uv run pytest` | `backend/` | 164 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 117 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
+| `npm test` | `frontend/` | 122 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
 | `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
@@ -305,10 +306,13 @@ api/index.py                    Vercel entry point (WSGI)
 - **First paint needs no JavaScript.** `index.html` holds a static shell of the panel
   and a "Loading map…" pill, styled by the app's stylesheet, so the layout appears as soon
   as the HTML and CSS arrive.
-- **The panel doesn't wait for the map.** The app's own code is 38 kB gzipped. MapLibre
+- **The panel doesn't wait for the map.** The app's own code is 39 kB gzipped. MapLibre
   (284 kB) loads as a separate lazy chunk that `index.html` preloads at low priority
   ([`vite.config.ts`](frontend/vite.config.ts)), so the form works first and the map
   follows. React, UI primitives and MapLibre cache in separate chunks.
+- **The demo video loads only when asked for.** The player is created when its dialog
+  opens, and the browser picks AV1 (9 MB) or H.264 (14 MB), both fast-start, with
+  captions. The files are versioned, so the CDN caches them for a year.
 - **Every wait is visible.** Status pills cover the map's first load, slow tiles,
   planning and re-planning. Origin and destination pulse on the map while routes are
   found, the forecast bar says when the heatmap is loading, and place search shows a

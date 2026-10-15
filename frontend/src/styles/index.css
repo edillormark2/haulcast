@@ -125,6 +125,18 @@
     animation: shimmer 1.4s var(--ease-in-out) infinite;
   }
 
+  /* The demo button's first-visit cue: a soft ring off the play mark. */
+  @keyframes demo-ping {
+    from {
+      opacity: 0.55;
+      scale: 1;
+    }
+    to {
+      opacity: 0;
+      scale: 2.2;
+    }
+  }
+
   @keyframes icon-in {
     from {
       opacity: 0;
