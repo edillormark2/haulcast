@@ -29,6 +29,13 @@ weather heatmap along the corridor shows how conditions move while the truck is 
 
 <br clear="right">
 
+**In real weather.** A storm over the mountains east of San Diego, planned live for a
+45,000 lb load. Route B avoids both No Travel stretches. The heatmap shows the storm's
+shape, and each checkpoint says when the truck gets there and what it will meet (here,
+0.98 in/hr of rain: Severe).
+
+![A live plan through a storm: a checkpoint list with a Severe rain card on the map, the phone layout recommending Route B, and the San Diego to El Centro routes over the weather heatmap](docs/screenshot-storm.jpg)
+
 ## Contents
 
 1. [Quick start](#quick-start)
