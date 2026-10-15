@@ -76,7 +76,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 | --- | --- | --- |
 | `uv run pytest` | `backend/` | 164 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 115 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
+| `npm test` | `frontend/` | 117 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
 | `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
