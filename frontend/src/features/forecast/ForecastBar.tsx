@@ -1,5 +1,6 @@
 import { Slider } from '@base-ui/react/slider'
 import {
+  ArrowCounterClockwiseIcon,
   CircleNotchIcon,
   EyeIcon,
   EyeSlashIcon,
@@ -9,11 +10,11 @@ import {
 } from '@phosphor-icons/react'
 import { useMemo } from 'react'
 
-import type { HeatmapMetric, Plan } from '../../api/types'
+import type { HeatmapMetric, Plan, Route } from '../../api/types'
 import { cx } from '../../lib/cx'
-import { formatClock, formatHour } from '../../lib/format'
+import { formatClock, formatDuration, formatHour } from '../../lib/format'
 import { HOUR_MS } from '../../lib/time'
-import { FORECAST_HOURS, useUiStore } from '../../state/uiStore'
+import { ARRIVAL_EPSILON_H, FORECAST_HOURS, useUiStore } from '../../state/uiStore'
 import { Segmented } from '../../ui/Segmented'
 import { Legend } from './Legend'
 
@@ -46,7 +47,6 @@ export function ForecastBar({
   const toggleHeatmap = useUiStore((state) => state.toggleHeatmap)
   const selectedRouteId = useUiStore((state) => state.selectedRouteId)
   const route = plan.routes.find((r) => r.id === selectedRouteId)
-  const tripHours = route ? Math.min(route.duration_s / 3600, FORECAST_HOURS) : 0
 
   const status =
     heatmapStatus === 'pending' ? (
@@ -75,7 +75,7 @@ export function ForecastBar({
       aria-label="Forecast timeline"
       className="space-y-2.5 rounded-2xl bg-surface/97 p-3 shadow-panel backdrop-blur-md sm:p-3.5"
     >
-      <TimeScrubber departureMs={departureMs} tripHours={tripHours} />
+      <TimeScrubber departureMs={departureMs} route={route} />
       <div className="flex items-center gap-x-3">
         <Segmented
           legend="Heatmap shows"
@@ -106,17 +106,33 @@ export function ForecastBar({
   )
 }
 
-function TimeScrubber({ departureMs, tripHours }: { departureMs: number; tripHours: number }) {
+/**
+ * The 0–48 h slider for the forecast, and Play for the trip: the truck drives
+ * the selected route from departure to arrival while the weather moves with it.
+ */
+function TimeScrubber({ departureMs, route }: { departureMs: number; route: Route | undefined }) {
   const hour = useUiStore((state) => state.forecastHour)
   const playing = useUiStore((state) => state.playing)
-  const setForecastHour = useUiStore((state) => state.setForecastHour)
-  const setPlaying = useUiStore((state) => state.setPlaying)
+  const play = useUiStore((state) => state.play)
+  const pause = useUiStore((state) => state.pause)
+  const scrubTo = useUiStore((state) => state.scrubTo)
   const ticks = useMemo(() => dayTicks(departureMs), [departureMs])
-  const shownHour = Math.round(hour)
+  const tripHours = route ? Math.min(route.duration_s / 3600, FORECAST_HOURS) : 0
+  const arrived = route !== undefined && hour >= tripHours - ARRIVAL_EPSILON_H
+  const moment = timelineMoment(hour, route)
+  const clockMs = departureMs + hour * HOUR_MS
+
+  const button = !route
+    ? { label: 'Play the trip', icon: 'play' as const }
+    : playing
+      ? { label: `Pause the trip on ${route.name}`, icon: 'pause' as const }
+      : arrived
+        ? { label: `Replay the trip on ${route.name}`, icon: 'replay' as const }
+        : { label: `Play the trip on ${route.name}`, icon: 'play' as const }
 
   const togglePlay = () => {
-    if (!playing && hour >= FORECAST_HOURS) setForecastHour(0)
-    setPlaying(!playing)
+    if (playing) pause()
+    else if (route) play({ routeId: route.id, endHour: tripHours })
   }
 
   return (
@@ -124,15 +140,16 @@ function TimeScrubber({ departureMs, tripHours }: { departureMs: number; tripHou
       <button
         type="button"
         onClick={togglePlay}
-        aria-label={playing ? 'Pause forecast playback' : 'Play the 48-hour forecast'}
-        className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-white transition-[background-color,scale] duration-150 ease-out hover:bg-ink-soft active:scale-[0.94]"
+        disabled={!route}
+        aria-label={button.label}
+        title={button.label}
+        className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-white transition-[background-color,scale] duration-150 ease-out hover:bg-ink-soft active:scale-[0.94] disabled:bg-ink/45"
       >
-        <span
-          key={playing ? 'pause' : 'play'}
-          className="grid animate-[icon-in_140ms_var(--ease-out)]"
-        >
-          {playing ? (
+        <span key={button.icon} className="grid animate-[icon-in_140ms_var(--ease-out)]">
+          {button.icon === 'pause' ? (
             <PauseIcon size={15} weight="fill" />
+          ) : button.icon === 'replay' ? (
+            <ArrowCounterClockwiseIcon size={15} weight="bold" />
           ) : (
             <PlayIcon size={15} weight="fill" className="translate-x-px" />
           )}
@@ -146,10 +163,7 @@ function TimeScrubber({ departureMs, tripHours }: { departureMs: number; tripHou
           max={FORECAST_HOURS}
           step={1}
           largeStep={6}
-          onValueChange={(value) => {
-            setPlaying(false)
-            setForecastHour(value)
-          }}
+          onValueChange={scrubTo}
         >
           <Slider.Control className="relative flex h-6 cursor-pointer touch-none items-center select-none">
             <Slider.Track className="relative h-1.5 w-full rounded-full bg-line">
@@ -157,7 +171,7 @@ function TimeScrubber({ departureMs, tripHours }: { departureMs: number; tripHou
                 aria-hidden
                 className="absolute inset-y-0 left-0 rounded-full bg-aqua"
                 style={{ width: `${(tripHours / FORECAST_HOURS) * 100}%` }}
-                title="Truck on the road"
+                title="The trip: Play drives the truck from departure to arrival"
               />
               <Slider.Indicator className="rounded-full bg-teal/55" />
               <Slider.Thumb
@@ -185,14 +199,26 @@ function TimeScrubber({ departureMs, tripHours }: { departureMs: number; tripHou
 
       <p className="w-[6.75rem] shrink-0 text-right leading-tight tabular-nums" aria-live="off">
         <span className="block text-xs font-semibold text-fg">
-          {formatHour(departureMs + shownHour * HOUR_MS)}
+          {Number.isInteger(hour) ? formatHour(clockMs) : formatClock(clockMs)}
         </span>
-        <span className={cx('text-2xs', shownHour === 0 ? 'text-teal' : 'text-fg-muted')}>
-          {shownHour === 0 ? 'Departure' : `+${shownHour} h`}
+        <span className={cx('text-2xs', moment.landmark ? 'text-teal' : 'text-fg-muted')}>
+          {moment.label}
         </span>
       </p>
     </div>
   )
+}
+
+/** The timeline's position in words: departure, arrival, or time on the road. */
+function timelineMoment(
+  hour: number,
+  route: Route | undefined,
+): { label: string; landmark: boolean } {
+  if (hour < ARRIVAL_EPSILON_H) return { label: 'Departure', landmark: true }
+  if (route && Math.abs(hour - route.duration_s / 3600) < ARRIVAL_EPSILON_H) {
+    return { label: 'Arrival', landmark: true }
+  }
+  return { label: `+${formatDuration(hour * 3600)}`, landmark: false }
 }
 
 /** Local midnights within the 48-hour window, labelled with the weekday. */

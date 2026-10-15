@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 import pytest
+import respx
 from rest_framework.test import APIClient
 
 from planner.tests.conftest import OPEN_METEO, VALHALLA_ROUTE
@@ -46,6 +47,28 @@ def test_rules_expose_the_brief_tables(client: APIClient) -> None:
     assert rules["factors"]["rain"]["no_travel_inclusive"] is False
     assert [r["heavier_than_lb"] for r in rules["load_rules"]] == [None, 30_000, 40_000]
     assert rules["recommendation_order"][0] == "no_travel_miles"
+
+
+def test_rules_are_cached_by_the_cdn(client: APIClient) -> None:
+    cache_control = client.get("/api/rules/")["Cache-Control"]
+    assert "public" in cache_control
+    assert "s-maxage=86400" in cache_control
+
+
+def test_place_search_is_cached_by_the_cdn(client: APIClient) -> None:
+    feature = {
+        "geometry": {"coordinates": [-96.797, 32.7767]},
+        "properties": {"name": "Dallas", "state": "Texas", "countrycode": "us", "type": "city"},
+    }
+    with respx.mock() as router:
+        photon = router.get("https://photon.komoot.io/api/").mock(
+            return_value=httpx.Response(200, json={"features": [feature]})
+        )
+        response = client.get("/api/geocode/", {"q": "Dallas"})
+
+    assert photon.called
+    assert response.json()["results"][0]["label"] == "Dallas, Texas, US"
+    assert "s-maxage=86400" in response["Cache-Control"]
 
 
 def test_plan_ranks_routes_by_weather_exposure(client: APIClient, upstream: Any) -> None:

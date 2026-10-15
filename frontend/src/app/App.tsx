@@ -1,24 +1,23 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { CircleNotchIcon } from '@phosphor-icons/react'
+import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react'
 
 import { useHeatmap, usePlan } from '../api/queries'
 import type { Plan, TripRequest } from '../api/types'
-import { useForecastClock } from '../features/forecast/useForecastClock'
 import { ForecastBar } from '../features/forecast/ForecastBar'
-import { CameraController } from '../features/map/CameraController'
-import { HeatmapController } from '../features/map/HeatmapController'
-import { RouteLayers } from '../features/map/layers/RouteLayers'
-import { MapInteractions } from '../features/map/MapInteractions'
-import { MapView } from '../features/map/MapView'
-import { RouteLabels } from '../features/map/RouteLabels'
-import { TruckMarker } from '../features/map/TruckMarker'
+import { useForecastClock } from '../features/forecast/useForecastClock'
+import { type Insets, MapLoading } from '../features/map/MapStatus'
 import { type PlanQueryState, PlannerPanel } from '../features/planner/PlannerPanel'
+import { formatDuration, formatMiles } from '../lib/format'
 import { useMediaQuery, useViewportHeight } from '../lib/useMediaQuery'
 import { useTripParams } from '../state/tripParams'
 import { useUiStore } from '../state/uiStore'
 import { BottomSheet } from '../ui/BottomSheet'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
-import { formatDuration, formatMiles } from '../lib/format'
 import { Logo, LogoMark } from '../ui/Logo'
+
+// MapLibre is most of the app's code. Loading the map on its own lets the
+// panel work while it downloads (index.html preloads it alongside).
+const TripMap = lazy(() => import('../features/map/TripMap'))
 
 const PANEL_WIDTH = 392
 const GUTTER = 12
@@ -30,7 +29,7 @@ export function App() {
   const heatmapQuery = useHeatmap(plan?.heatmap_request)
   const desktop = useMediaQuery('(min-width: 768px)')
   const resetForNewPlan = useUiStore((state) => state.resetForNewPlan)
-  const selectedRouteId = useUiStore((state) => state.selectedRouteId)
+  const clearPlan = useUiStore((state) => state.clearPlan)
   useForecastClock()
 
   const sheetSnap = useUiStore((state) => state.sheetSnap)
@@ -39,25 +38,42 @@ export function App() {
     if (plan) resetForNewPlan(plan.recommendation.route_id)
   }, [plan, resetForNewPlan])
 
+  // No trip in the URL, after New trip or the browser's back button: start clean.
+  const hasTrip = trip !== null
+  useEffect(() => {
+    if (!hasTrip) clearPlan()
+  }, [hasTrip, clearPlan])
+
+  const planning = planQuery.isFetching
+  const refreshing = planning && planQuery.isPlaceholderData
   const query: PlanQueryState = {
     plan,
-    loading: planQuery.isFetching,
-    refreshing: planQuery.isFetching && planQuery.isPlaceholderData,
+    loading: planning,
+    refreshing,
     error: planQuery.error,
     retry: () => void planQuery.refetch(),
   }
   const submit = useCallback((next: TripRequest) => setTrip(next), [setTrip])
+  const startOver = useCallback(() => setTrip(null), [setTrip])
 
   const departureMs = plan ? Date.parse(plan.trip.departure) : 0
-  const selectedRoute = plan?.routes.find((route) => route.id === selectedRouteId)
   const viewportHeight = useViewportHeight()
   const snapPoints = useMemo(
     () => [plan ? 176 : 148, Math.round(viewportHeight * 0.52), Math.round(viewportHeight * 0.9)],
     [plan, viewportHeight],
   )
-  const insets = desktop
+  const insets: Insets = desktop
     ? { top: GUTTER, left: PANEL_WIDTH + GUTTER, right: 56, bottom: plan ? 168 : GUTTER }
     : { top: plan ? 132 : GUTTER, left: GUTTER, right: GUTTER, bottom: snapPoints[0] ?? 0 }
+  // Status pills follow the sheet; route framing assumes its peek height.
+  const overlayInsets: Insets = desktop
+    ? insets
+    : { ...insets, bottom: snapPoints[sheetSnap] ?? insets.bottom }
+  const mapStatus = refreshing
+    ? 'Updating the routes…'
+    : planning
+      ? 'Finding three truck routes…'
+      : null
 
   const forecastBar = plan && (
     <ForecastBar
@@ -68,28 +84,21 @@ export function App() {
       compact={!desktop}
     />
   )
-  const panel = <PlannerPanel trip={trip} query={query} onSubmit={submit} />
+  const panel = <PlannerPanel trip={trip} query={query} onSubmit={submit} onNewTrip={startOver} />
 
   return (
     <main className="relative h-dvh w-full overflow-hidden">
       <ErrorBoundary fallback={<MapUnavailable />}>
-        <MapView>
-          {plan && (
-            <>
-              <RouteLayers routes={plan.routes} />
-              <HeatmapController data={heatmapQuery.data} />
-              {selectedRoute && <TruckMarker route={selectedRoute} departureMs={departureMs} />}
-              <RouteLabels routes={plan.routes} />
-              <MapInteractions
-                routes={plan.routes}
-                heatmap={heatmapQuery.data}
-                thresholds={plan.thresholds}
-                departureMs={departureMs}
-              />
-              <CameraController routes={plan.routes} insets={insets} />
-            </>
-          )}
-        </MapView>
+        <Suspense fallback={<MapLoading insets={overlayInsets} />}>
+          <TripMap
+            trip={trip}
+            plan={plan}
+            heatmap={heatmapQuery.data}
+            status={mapStatus}
+            insets={insets}
+            overlayInsets={overlayInsets}
+          />
+        </Suspense>
       </ErrorBoundary>
 
       {desktop ? (
@@ -118,7 +127,7 @@ export function App() {
             snapPoints={snapPoints}
             snapIndex={sheetSnap}
             onSnapChange={setSheetSnap}
-            header={<SheetHeader plan={plan} />}
+            header={<SheetHeader plan={plan} planning={planning && !plan} />}
           >
             {panel}
           </BottomSheet>
@@ -140,7 +149,7 @@ function MapUnavailable() {
 }
 
 /** Always visible on phones: the decision, even with the sheet collapsed. */
-function SheetHeader({ plan }: { plan: Plan | undefined }) {
+function SheetHeader({ plan, planning }: { plan: Plan | undefined; planning: boolean }) {
   const route = plan?.routes.find((r) => r.id === plan.recommendation.route_id)
   return (
     <div className="border-b border-line px-4 pb-3">
@@ -161,6 +170,11 @@ function SheetHeader({ plan }: { plan: Plan | undefined }) {
                 : ', clear of severe weather'}
             </p>
           </div>
+        </div>
+      ) : planning ? (
+        <div className="flex items-center gap-2.5" role="status">
+          <CircleNotchIcon size={22} className="animate-spin text-teal" aria-hidden />
+          <p className="text-sm font-semibold text-fg">Finding three truck routes…</p>
         </div>
       ) : (
         <div className="flex items-center gap-2.5">

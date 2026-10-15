@@ -89,8 +89,18 @@ export function MapInteractions({
       setHover(null)
     }
 
+    // Route pills, the truck and the pinned card are DOM markers inside the
+    // map, so their pointer events reach the map too. They handle their own.
+    const overMarker = (event: MapMouseEvent) =>
+      event.originalEvent.target instanceof Element &&
+      event.originalEvent.target.closest('.maplibregl-marker') !== null
+
     const onMove = (event: MapMouseEvent) => {
       cancelAnimationFrame(frame)
+      if (overMarker(event)) {
+        setHover(null)
+        return
+      }
       frame = requestAnimationFrame(() => update(event))
     }
     const onLeave = () => {
@@ -101,6 +111,7 @@ export function MapInteractions({
       canvas.style.cursor = ''
     }
     const onClick = (event: MapMouseEvent) => {
+      if (overMarker(event)) return
       const { checkpoint, routeId } = pick(event.point)
       if (checkpoint) store().focusCheckpoint(checkpoint)
       else if (routeId) store().selectRoute(routeId)

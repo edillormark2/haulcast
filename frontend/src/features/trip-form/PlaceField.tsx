@@ -1,5 +1,5 @@
 import { Combobox } from '@base-ui/react/combobox'
-import { MapPinIcon, MapPinSimpleIcon, XIcon } from '@phosphor-icons/react'
+import { CircleNotchIcon, MapPinIcon, MapPinSimpleIcon, XIcon } from '@phosphor-icons/react'
 import { useId, useMemo, useState } from 'react'
 
 import { usePlaceSearch } from '../../api/queries'
@@ -81,6 +81,13 @@ export function PlaceField({ label, placeholder, role, value, onChange, error }:
           aria-describedby={error ? `${id}-error` : undefined}
           className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm text-fg outline-none placeholder:text-fg-subtle"
         />
+        {waiting && (
+          <CircleNotchIcon
+            size={14}
+            className="shrink-0 animate-spin text-fg-subtle"
+            aria-label="Searching places"
+          />
+        )}
         <Combobox.Clear
           aria-label={`Clear ${label.toLowerCase()}`}
           className="mr-1.5 grid size-7 place-items-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg"

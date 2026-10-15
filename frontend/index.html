@@ -13,7 +13,96 @@
     <title>Haulcast: weather-aware truck routing</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- The first paint, drawn from this file and the stylesheet alone while the
+           app's code downloads. React replaces it with the real panel and map. -->
+      <div class="relative h-dvh w-full overflow-hidden bg-canvas">
+        <p class="sr-only" role="status">Loading Haulcast…</p>
+        <div
+          aria-hidden="true"
+          class="absolute inset-0 grid place-items-center pt-3 pb-[52dvh] md:pt-3 md:pr-14 md:pb-3 md:pl-[404px]"
+        >
+          <p
+            class="flex items-center gap-2 rounded-full bg-surface/95 py-2 pr-3.5 pl-3 text-xs font-semibold text-fg shadow-float ring-1 ring-ink/5"
+          >
+            <svg class="size-3.5 animate-spin text-teal" viewBox="0 0 256 256" fill="currentColor">
+              <path
+                d="M232,128a104,104,0,0,1-208,0c0-41,23.81-78.36,60.66-95.27a8,8,0,0,1,6.68,14.54C60.15,61.59,40,93.27,40,128a88,88,0,0,0,176,0c0-34.73-20.15-66.41-51.34-80.73a8,8,0,0,1,6.68-14.54C208.19,49.64,232,87,232,128Z"
+              />
+            </svg>
+            Loading map…
+          </p>
+        </div>
+
+        <div
+          aria-hidden="true"
+          class="absolute inset-x-0 bottom-0 z-10 flex h-[52dvh] flex-col overflow-hidden rounded-t-[20px] bg-surface shadow-panel md:top-3 md:bottom-3 md:left-3 md:h-auto md:w-[392px] md:rounded-[20px]"
+        >
+          <header class="relative hidden shrink-0 bg-ink px-5 pt-4 pb-7 md:block">
+            <div class="flex items-center gap-2.5">
+              <svg width="28" height="28" viewBox="0 0 32 32">
+                <rect width="32" height="32" rx="8" fill="#0d5567" />
+                <path
+                  d="M8 23.5c4.5 0 4-12 8.5-12s4 9.5 7.5 3.5"
+                  fill="none"
+                  stroke="#bcddde"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  opacity=".6"
+                />
+                <circle cx="8" cy="23.5" r="3.2" fill="#008080" />
+                <circle cx="16.5" cy="11.5" r="2.8" fill="#bcddde" />
+                <circle cx="24" cy="15" r="3.2" fill="#f84960" />
+              </svg>
+              <div class="leading-none">
+                <p class="text-[17px] font-bold tracking-[-0.01em] text-white">Haulcast</p>
+                <p class="mt-1 text-2xs text-aqua/80">Weather-aware truck routing</p>
+              </div>
+            </div>
+            <svg
+              class="absolute inset-x-0 -bottom-px h-4 w-full text-surface"
+              viewBox="0 0 400 16"
+              preserveAspectRatio="none"
+            >
+              <path d="M0 16 Q200 -6 400 16 Z" fill="currentColor" />
+            </svg>
+          </header>
+          <div class="border-b border-line px-4 pb-3 md:hidden">
+            <div class="mx-auto mt-2 mb-3.5 h-1 w-9 rounded-full bg-line-strong"></div>
+            <div class="flex items-center gap-2.5">
+              <svg width="26" height="26" viewBox="0 0 32 32">
+                <rect width="32" height="32" rx="8" fill="#0d5567" />
+                <path
+                  d="M8 23.5c4.5 0 4-12 8.5-12s4 9.5 7.5 3.5"
+                  fill="none"
+                  stroke="#bcddde"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  opacity=".6"
+                />
+                <circle cx="8" cy="23.5" r="3.2" fill="#008080" />
+                <circle cx="16.5" cy="11.5" r="2.8" fill="#bcddde" />
+                <circle cx="24" cy="15" r="3.2" fill="#f84960" />
+              </svg>
+              <p class="text-sm font-semibold text-fg">Plan a weather-safe truck route</p>
+            </div>
+          </div>
+          <div class="space-y-4 px-4 pt-4">
+            <div class="space-y-3">
+              <div class="shimmer h-10 rounded-lg"></div>
+              <div class="shimmer h-10 rounded-lg"></div>
+            </div>
+            <div class="shimmer h-10 rounded-lg"></div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="shimmer h-10 rounded-lg"></div>
+              <div class="shimmer h-10 rounded-lg"></div>
+            </div>
+            <div class="h-11 rounded-xl bg-ink/15"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <noscript>Haulcast needs JavaScript to plan routes and draw the map.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

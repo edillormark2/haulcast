@@ -16,6 +16,8 @@ from planner.services.heatmap import build_heatmap
 from planner.services.trip_planner import NamedPlace, TripRequest, plan_trip
 
 MIN_QUERY_LENGTH, MAX_QUERY_LENGTH = 2, 120
+HOUR_S = 60 * 60
+DAY_S = 24 * HOUR_S
 
 
 class HealthView(APIView):
@@ -29,7 +31,9 @@ class RiskRulesView(APIView):
 
     def get(self, request: Request) -> Response:
         response = Response(present_rules())
-        patch_cache_control(response, public=True, max_age=24 * 60 * 60)
+        # s-maxage lets the CDN answer without waking the function; a new
+        # deployment starts with an empty CDN cache, so rule changes still ship.
+        patch_cache_control(response, public=True, max_age=DAY_S, s_maxage=DAY_S)
         return response
 
 
@@ -39,10 +43,8 @@ class GeocodeView(APIView):
 
     def get(self, request: Request) -> Response:
         query = request.query_params.get("q", "").strip()[:MAX_QUERY_LENGTH]
-        if len(query) < MIN_QUERY_LENGTH:
-            return Response({"results": []})
-        places = search_places(query)
-        return Response(
+        places = search_places(query) if len(query) >= MIN_QUERY_LENGTH else []
+        response = Response(
             {
                 "results": [
                     {
@@ -57,6 +59,9 @@ class GeocodeView(APIView):
                 ]
             }
         )
+        # Places barely change: popular searches come straight from the CDN.
+        patch_cache_control(response, public=True, max_age=HOUR_S, s_maxage=DAY_S)
+        return response
 
 
 class PlanView(APIView):

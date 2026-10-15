@@ -15,8 +15,10 @@ A suggested outline for the 5–10 minute video. Times are approximate.
 - Point out the departure quick picks, the load weight, and the load hint, which changes
   between 30,000, 36,000 and 42,000 lb.
 - Choose **25 mi** checkpoints and submit. Mention the honest loading message: routing,
-  then the forecast at every checkpoint.
-- Note that the trip is now in the URL, so plans are shareable links.
+  then the forecast at every checkpoint. The map frames the trip's two ends and says it's
+  finding routes.
+- Note that the trip is now in the URL, so plans are shareable links. **New trip** goes
+  back to a blank planner and the sample trips; **Edit** changes this one.
 
 ## 1:30 The recommendation (1.5 min)
 
@@ -42,8 +44,9 @@ A suggested outline for the 5–10 minute video. Times are approximate.
 
 ## 4:30 The heatmap (1.5 min)
 
-- Press **Play**: 48 hours sweep across the corridor and the truck marker drives the
-  selected route. Then scrub the slider.
+- Press **Play**: the truck drives the selected route from departure to arrival while the
+  weather moves with it, then stops; **Replay** runs it again. Pick another route and the
+  trip rewinds. Then scrub the slider across the full 48 hours.
 - Switch between **Risk, Wind, Rain and Snow**. Same colours, same meaning; the legend
   shows this load's thresholds (wind bands shift for heavy loads).
 - Hover the shading for a readout at that hour. Read the caption: shading is the weather

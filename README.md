@@ -191,9 +191,15 @@ The recommendation comes with:
 - **No colour-only cues.** No Travel gets road-closed hatching, and the same colours mean
   the same bands in the Risk, Wind, Rain and Snow views.
 - **Hover readouts** use a CPU copy of the same maths ([`heatmap.ts`](frontend/src/lib/heatmap.ts)).
-- **Playback.** A small clock drives playback at 4 forecast-hours per second and eases the
-  map toward the slider while scrubbing. Hour changes reach the heatmap, the truck marker
-  and the route strips through store subscriptions, outside React rendering.
+- **Playback plays the trip.** The slider covers the full 0–48 h forecast, and **Play**
+  drives the selected route from departure to arrival while the weather moves with it.
+  Any trip takes 10–20 s to play (a three-hour haul takes ten), stops at arrival, and
+  **Replay** starts it over. Switching routes stops a played trip and rewinds to
+  departure; an hour picked on the slider stays put, so routes can be compared at that
+  hour.
+- **Hour changes skip React.** A small clock drives playback and eases the map toward the
+  slider while scrubbing. Hour changes reach the heatmap, the truck marker and the route
+  strips through store subscriptions, outside React rendering.
 
 ## Architecture
 
@@ -236,13 +242,29 @@ api/index.py                    Vercel entry point (WSGI)
 **Performance**
 
 - **Slider and playback** touch only a uniform, a marker and two style properties.
-- **Load cost.** The app's own code is 42 kB gzipped; React, UI primitives and MapLibre
-  are cached in separate chunks.
+- **Hover is free.** Highlighting a route flips MapLibre feature state; route data is
+  re-uploaded only when the selection changes the drawing order.
+- **First paint needs no JavaScript.** `index.html` holds a static shell of the panel
+  and a "Loading map…" pill, styled by the app's stylesheet, so the layout appears as soon
+  as the HTML and CSS arrive.
+- **The panel doesn't wait for the map.** The app's own code is 35 kB gzipped. MapLibre
+  (284 kB) loads as a separate lazy chunk that `index.html` preloads at low priority
+  ([`vite.config.ts`](frontend/vite.config.ts)), so the form works first and the map
+  follows. React, UI primitives and MapLibre cache in separate chunks.
+- **Every wait is visible.** Status pills cover the map's first load, slow tiles,
+  planning and re-planning. Origin and destination pulse on the map while routes are
+  found, the forecast bar says when the heatmap is loading, and place search shows a
+  spinner.
 - **Plan cost.**
   - **Routes** are cached for 30 minutes, so changing the checkpoint interval re-plans in
     about 0.3 s.
   - **Forecasts** come from parallel batched lookups, cached per cell.
   - **Route geometry** is thinned to 5 m before processing.
+  - **The function runs in Frankfurt** (`fra1`), next to every upstream: Valhalla,
+    Photon and Open-Meteo are hosted in Germany and OSRM in Zurich. A plan calls them
+    several times in a row, so those are the hops worth shortening.
+  - **Rules and place searches** are cached by Vercel's CDN (`s-maxage`), so repeats
+    never reach Python.
 
 ## API
 
@@ -337,6 +359,8 @@ All responses are JSON; errors share one envelope:
 
 One Vercel project serves both halves ([`vercel.json`](vercel.json)): the React build from
 the CDN and Django as a Python function ([`api/index.py`](api/index.py)) behind `/api/*`.
+The function is pinned to `fra1`, beside the routing, geocoding and weather services it
+calls.
 
 1. Import the GitHub repository in Vercel (framework preset: Other; settings come from
    `vercel.json`).

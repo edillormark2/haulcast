@@ -34,7 +34,8 @@ interface TripFormProps {
 export function TripForm({ initial, busy, onSubmit }: TripFormProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(initial))
   const [errors, setErrors] = useState<Errors>({})
-  const rules = useRiskRules().data
+  const rulesQuery = useRiskRules()
+  const rules = rulesQuery.data
   const ids = { departure: useId(), load: useId() }
 
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -181,9 +182,17 @@ export function TripForm({ initial, busy, onSubmit }: TripFormProps) {
       >
         <ScalesIcon size={14} className="mt-px shrink-0 opacity-70" aria-hidden />
         {errors.load ??
-          (loadLb === null
-            ? 'Enter the cargo weight in pounds.'
-            : loadHint(loadLb, rules?.load_rules))}
+          (loadLb === null ? (
+            'Enter the cargo weight in pounds.'
+          ) : rulesQuery.isPending ? (
+            <span
+              role="status"
+              aria-label="Loading the load rules"
+              className="shimmer mt-0.5 inline-block h-3 w-56 rounded"
+            />
+          ) : (
+            loadHint(loadLb, rules?.load_rules)
+          ))}
       </p>
 
       <Button type="submit" variant="primary" size="lg" disabled={busy} className="w-full">

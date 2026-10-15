@@ -50,14 +50,24 @@ main decisions went the way they did.
   - **Map-side updates.** The heatmap frame, truck marker, route-strip cursor and
     checkpoint highlight all update through store subscriptions.
   - **What does re-render.** Only the slider itself re-renders during playback.
+- **Playback follows the trip.** Play drives the selected route from departure to
+  arrival in 10–20 s, whatever its length, while the 0–48 h slider stays free for the
+  forecast. Switching routes rewinds a played trip, and an hour picked by hand stays put.
 - **MapLibre is driven imperatively.**
-  - **Data updates** go through `setData` and feature-state.
+  - **Data updates.** Routes are uploaded with `setData` only when the selection changes
+    their order; hover and checkpoint highlights are feature-state.
   - **Basemap style.** It is transformed once at load: recoloured, decluttered, with paint
     transitions off.
   - **Layer order.** Weather sits under roads and route lines under labels.
 - **Delivery is fast.**
-  - Vendor chunks are cached separately; the app's own code is 42 kB gzipped.
-  - Fonts are self-hosted.
+  - A static shell in `index.html` paints the layout before any JavaScript runs.
+  - The app's own code is 35 kB gzipped. MapLibre is a lazy chunk, preloaded at low
+    priority, so the panel works while the map downloads. Vendor chunks cache separately.
+  - Fonts are self-hosted, and the Latin subset is preloaded.
+  - The API function runs in Frankfurt, beside its upstream services, and the CDN caches
+    rules and place searches.
+- **Every wait is visible.** The map, slow tiles, planning, the heatmap, the load rules
+  and place search each have their own loading state.
   - API responses are compact: geometry is simplified to about 30 m, and the heatmap is
     one base64 byte array.
 - **Motion is purposeful.**

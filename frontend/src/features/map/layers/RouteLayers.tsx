@@ -6,7 +6,7 @@ import type { Route } from '../../../api/types'
 import { RISK, RISK_LEVELS } from '../../../lib/risk'
 import { type CheckpointRef, useUiStore } from '../../../state/uiStore'
 import { insertionPoints } from '../basemap'
-import { checkpointPoints, riskSections, routeLines } from '../geojson'
+import { checkpointKey, checkpointPoints, riskSections, routeLines, sectionKey } from '../geojson'
 import { useMap } from '../mapContext'
 
 export const LAYER = {
@@ -30,8 +30,8 @@ const riskColor: ExpressionSpecification = [
 const selected: ExpressionSpecification = ['==', ['get', 'selected'], true]
 const emphasized: ExpressionSpecification = [
   'any',
-  ['==', ['get', 'selected'], true],
-  ['==', ['get', 'hovered'], true],
+  selected,
+  ['boolean', ['feature-state', 'hovered'], false],
 ]
 
 /** Width that grows with zoom, wider for the selected route. */
@@ -47,27 +47,24 @@ function width(selectedWidth: [number, number], otherWidth: [number, number]) {
   ] as unknown as ExpressionSpecification
 }
 
-/** All three routes drawn in their risk colours; the selected one on top and bolder. */
+/**
+ * All three routes drawn in their risk colours; the selected one on top and
+ * bolder. Selection re-uploads the routes (it changes their stacking order);
+ * hover only flips feature state, so it shows on the next frame.
+ */
 export function RouteLayers({ routes }: { routes: Route[] }) {
   const map = useMap()
   const selectedRouteId = useUiStore((state) => state.selectedRouteId)
-  const hoveredRouteId = useUiStore((state) => state.hoveredRouteId)
 
   useEffect(() => {
     const beforeId = insertionPoints(map.getStyle().layers).overlays
-    map.addSource(SOURCE.lines, { type: 'geojson', data: EMPTY })
-    map.addSource(SOURCE.sections, { type: 'geojson', data: EMPTY })
+    map.addSource(SOURCE.lines, { type: 'geojson', data: EMPTY, promoteId: 'routeId' })
+    map.addSource(SOURCE.sections, { type: 'geojson', data: EMPTY, promoteId: 'key' })
     map.addSource(SOURCE.checkpoints, { type: 'geojson', data: EMPTY, promoteId: 'key' })
 
     const lineLayout = { 'line-cap': 'round', 'line-join': 'round' } as const
-    const sortKey: ExpressionSpecification = [
-      'case',
-      selected,
-      2,
-      ['==', ['get', 'hovered'], true],
-      1,
-      0,
-    ]
+    // Layout properties can't read feature state, so only selection reorders.
+    const sortKey: ExpressionSpecification = ['case', selected, 1, 0]
 
     map.addLayer(
       {
@@ -175,11 +172,44 @@ export function RouteLayers({ routes }: { routes: Route[] }) {
   }, [map, routes])
 
   useEffect(() => {
-    const state = { selectedRouteId, hoveredRouteId }
-    void map.getSource<GeoJSONSource>(SOURCE.lines)?.setData(routeLines(routes, state))
-    void map.getSource<GeoJSONSource>(SOURCE.sections)?.setData(riskSections(routes, state))
-    void map.getSource<GeoJSONSource>(SOURCE.checkpoints)?.setData(checkpointPoints(routes, state))
-  }, [map, routes, selectedRouteId, hoveredRouteId])
+    const selection = selectedRouteId
+    void map.getSource<GeoJSONSource>(SOURCE.lines)?.setData(routeLines(routes, selection))
+    void map.getSource<GeoJSONSource>(SOURCE.sections)?.setData(riskSections(routes, selection))
+    void map
+      .getSource<GeoJSONSource>(SOURCE.checkpoints)
+      ?.setData(checkpointPoints(routes, selection))
+  }, [map, routes, selectedRouteId])
+
+  // Brighten the hovered route: its line, its risk sections and its checkpoints.
+  useEffect(() => {
+    const mark = (routeId: string | null, hovered: boolean) => {
+      const route = routes.find((candidate) => candidate.id === routeId)
+      if (!route || !map.getSource(SOURCE.lines)) return
+      map.setFeatureState({ source: SOURCE.lines, id: route.id }, { hovered })
+      route.sections.forEach((_, index) =>
+        map.setFeatureState(
+          { source: SOURCE.sections, id: sectionKey(route.id, index) },
+          { hovered },
+        ),
+      )
+      for (const checkpoint of route.checkpoints) {
+        const id = checkpointKey(route.id, checkpoint.index)
+        map.setFeatureState({ source: SOURCE.checkpoints, id }, { hovered })
+      }
+    }
+    let current = useUiStore.getState().hoveredRouteId
+    mark(current, true)
+    const unsubscribe = useUiStore.subscribe((state) => {
+      if (state.hoveredRouteId === current) return
+      mark(current, false)
+      current = state.hoveredRouteId
+      mark(current, true)
+    })
+    return () => {
+      unsubscribe()
+      mark(current, false)
+    }
+  }, [map, routes])
 
   return null
 }

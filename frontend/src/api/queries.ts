@@ -41,9 +41,24 @@ export function usePlan(trip: TripRequest | null) {
     staleTime: 10 * MINUTE,
     retry: retryTransient,
     // Changing only the checkpoint interval keeps the old routes on screen
-    // while the new ones load.
-    placeholderData: keepPreviousData,
+    // while the new ones load. A different trip starts from a clean map.
+    placeholderData: (previous, previousQuery) => {
+      const previousTrip = previousQuery?.queryKey[1] as TripRequest | null | undefined
+      return trip && previousTrip && sameJourney(trip, previousTrip) ? previous : undefined
+    },
   })
+}
+
+/** Same ends, departure and load: only the checkpoint spacing may differ. */
+function sameJourney(a: TripRequest, b: TripRequest): boolean {
+  return (
+    a.origin.lat === b.origin.lat &&
+    a.origin.lon === b.origin.lon &&
+    a.destination.lat === b.destination.lat &&
+    a.destination.lon === b.destination.lon &&
+    a.departure === b.departure &&
+    a.load_lb === b.load_lb
+  )
 }
 
 export function useHeatmap(heatmapRequest: HeatmapRequest | undefined) {

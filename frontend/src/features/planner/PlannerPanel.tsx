@@ -1,10 +1,11 @@
 import { Tabs } from '@base-ui/react/tabs'
-import { CircleNotchIcon } from '@phosphor-icons/react'
+import { ArrowLeftIcon, CircleNotchIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 
 import type { Plan, TripRequest } from '../../api/types'
 import { cx } from '../../lib/cx'
 import { type PanelTab, useUiStore } from '../../state/uiStore'
+import { Button } from '../../ui/Button'
 import { CheckpointList } from '../checkpoints/CheckpointList'
 import { RecommendationCard } from '../routes/RecommendationCard'
 import { RouteList } from '../routes/RouteList'
@@ -30,26 +31,46 @@ interface PlannerPanelProps {
   trip: TripRequest | null
   query: PlanQueryState
   onSubmit: (trip: TripRequest) => void
+  /** Leaves the current trip for a blank planner. */
+  onNewTrip: () => void
 }
 
 /** Everything left of the map: the trip, the decision, the evidence. */
-export function PlannerPanel({ trip, query, onSubmit }: PlannerPanelProps) {
+export function PlannerPanel({ trip, query, onSubmit, onNewTrip }: PlannerPanelProps) {
   const [editing, setEditing] = useState(false)
-  const showForm = trip === null || editing
 
   const submit = (next: TripRequest) => {
     setEditing(false)
     onSubmit(next)
   }
 
+  if (trip && editing) {
+    return (
+      <div className="space-y-4 px-4 pt-4 pb-8">
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)} className="-mt-1 -ml-2">
+          <ArrowLeftIcon size={13} weight="bold" aria-hidden />
+          Back to routes
+        </Button>
+        <TripForm initial={trip} busy={query.loading} onSubmit={submit} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5 px-4 pt-4 pb-8">
-      {showForm ? (
-        <TripForm initial={trip} busy={query.loading} onSubmit={submit} />
+      {trip ? (
+        <TripSummary
+          trip={trip}
+          onEdit={() => setEditing(true)}
+          onNewTrip={() => {
+            setEditing(false)
+            onNewTrip()
+          }}
+        />
       ) : (
-        <TripSummary trip={trip} onEdit={() => setEditing(true)} />
+        <TripForm initial={null} busy={query.loading} onSubmit={submit} />
       )}
-      {!editing && <Results trip={trip} query={query} onTry={submit} />}
+      <Results trip={trip} query={query} onTry={submit} />
     </div>
   )
 }

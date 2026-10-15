@@ -7,7 +7,7 @@ import { PLACES } from './fixtures/places'
 import { planFor } from './fixtures/plan'
 import { RULES } from './fixtures/rules'
 
-test('plans a sample trip, compares routes and plays the forecast', async ({ page }) => {
+test('plans a sample trip, compares routes, plays the trip and starts over', async ({ page }) => {
   const errors: string[] = []
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text())
@@ -68,9 +68,22 @@ test('plans a sample trip, compares routes and plays the forecast', async ({ pag
   await expect(timeline.getByText('+1 h', { exact: true })).toBeVisible()
   await expect(timeline.getByText('Departure', { exact: true })).toBeHidden()
 
-  await timeline.getByRole('button', { name: 'Play the 48-hour forecast' }).click()
-  await expect(timeline.getByRole('button', { name: 'Pause forecast playback' })).toBeVisible()
+  // Play drives the selected route's trip from where the slider is.
+  await timeline.getByRole('button', { name: 'Play the trip on Route C' }).click()
+  await expect(timeline.getByRole('button', { name: 'Pause the trip on Route C' })).toBeVisible()
   await expect(timeline.getByText('+1 h', { exact: true })).toBeHidden()
+
+  // Switching routes stops the trip and rewinds the truck to departure.
+  await page.getByRole('tab', { name: 'Routes' }).click()
+  await routeB.click()
+  await expect(timeline.getByRole('button', { name: 'Play the trip on Route B' })).toBeVisible()
+  await expect(timeline.getByText('Departure', { exact: true })).toBeVisible()
+
+  // New trip goes back to a blank planner and the sample trips.
+  await page.getByRole('button', { name: 'New trip' }).click()
+  await expect(page).not.toHaveURL(/[?&]from=/)
+  await expect(page.getByRole('button', { name: 'Dallas to Atlanta' })).toBeVisible()
+  await expect(timeline).toBeHidden()
 
   expect(api.unstubbed).toEqual([])
   expect(errors).toEqual([])
