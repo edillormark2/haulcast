@@ -76,6 +76,7 @@ export function layoutFor(corridor: LonLat[][], departure: string): HeatmapLayou
   const windowStart = Math.floor(startS / BLOCK_S) * BLOCK_S
   const window = { start: windowStart, end: windowStart + WINDOW_HOURS * HOUR_S }
   const planned = samples.slice(0, ANCHORED).map(([lon]) => weatherAt(lon, window))
+  const anchorFrames = packFrames(planned, startS, FRAMES, STEPS, THRESHOLDS)
 
   return {
     grid,
@@ -85,7 +86,7 @@ export function layoutFor(corridor: LonLat[][], departure: string): HeatmapLayou
     alpha: Buffer.from(new Uint8Array(COLUMNS * ROWS).fill(255)).toString('base64'),
     sources: samples.map((_, i) => i),
     samples,
-    anchor_frames: Buffer.from(packFrames(planned, startS, FRAMES, STEPS)).toString('base64'),
+    anchor_frames: Buffer.from(anchorFrames).toString('base64'),
     forecast: { url: OPEN_METEO_URL, ...window },
   }
 }

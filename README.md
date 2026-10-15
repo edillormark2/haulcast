@@ -74,7 +74,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 
 | Command | Where | What |
 | --- | --- | --- |
-| `uv run pytest` | `backend/` | 138 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
+| `uv run pytest` | `backend/` | 160 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
 | `npm test` | `frontend/` | 99 tests: thresholds, heatmap packing and sampling, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
@@ -203,16 +203,23 @@ The recommendation comes with:
   fetched are reused for 30 minutes, so a later departure in the same 6-hour block costs
   nothing.
 - **Same bytes either way.** The browser's packer is a copy of the server's, down to
-  Python's rounding (halves go to even, where `Math.round` would round up). The backend's
-  tests write a fixture of Open-Meteo answers, with ties on purpose, and the texture the
-  server packs from them. Vitest checks that the browser packs exactly the same bytes.
+  Python's rounding of readings (halves go to even, where `Math.round` would round up).
+  The backend's tests write a fixture of Open-Meteo answers, with rounding ties and band
+  edges on purpose, and the texture the server packs from them. Vitest checks that the
+  browser packs exactly the same bytes.
 - **The server is the fallback.** If the browser can't get the forecasts (the viewer's
   quota is used up, a network blocks Open-Meteo, or it fails), it asks the server
   (`POST /api/heatmap/`), which fetches and packs the same layout as before.
 - **Frames.** Frame *k* is the weather at *departure + k hours*, read with the same
-  function the checkpoints use, so the two agree at whole hours.
-- **Packing.** Wind, rain, snow and a corridor-edge weight are packed as RGBA bytes. Every
-  threshold lands on a whole byte.
+  function the checkpoints use, so at whole hours a cell's value falls in the band a
+  checkpoint reading the same forecast gets.
+- **Packing.** Wind, rain, snow and a corridor-edge weight are packed as RGBA bytes, in
+  steps of 0.5 mph, 0.01 in/hr of rain and 0.02 in/hr of snow. Every threshold lands on a
+  whole byte, and readings round down to their step, so each keeps the level a checkpoint
+  gives it: 34.8 mph packs as 34.5, Moderate. (Rounding to the nearest step made it 35.0,
+  High, and 0.99 in/hr of snow 1.00.) Past an exclusive No Travel limit readings round up
+  instead, so 3.01 in/hr of snow stays No Travel rather than landing on 3.00, which is
+  Severe. A test checks this at every 0.1 mph and 0.01 in/hr (see [Quality](#quality)).
 
 **In the browser**
 ([`HeatmapLayer.ts`](frontend/src/features/map/heatmap/HeatmapLayer.ts), [`shaders.ts`](frontend/src/features/map/heatmap/shaders.ts)):
@@ -383,6 +390,9 @@ All responses are JSON; errors share one envelope:
   - **Boundaries.** Every band edge of the table, and the load-rule grid.
   - **Load thresholds.** An exhaustive check at every 0.1 mph from 0 to 90 at six loads
     shows the folded thresholds behind the heatmap and legends match `assess()` exactly.
+  - **Heatmap bytes.** Every 0.1 mph from 0 to 90 at seven loads, and every 0.01 in/hr of
+    rain and snow, packs into a heatmap byte with the level `assess()` gives the reading
+    ([`test_heatmap.py`](backend/planner/tests/test_heatmap.py)).
   - **Ranking.** Each criterion decides on its own, the No Travel gate applies first, and
     floating-point noise never decides.
 - **The API is tested end to end** against faked Valhalla and Open-Meteo: ranking, risk
@@ -399,8 +409,8 @@ All responses are JSON; errors share one envelope:
   plan and heatmap requests the way a busy Open-Meteo would, and checks that the heatmap
   falls back to the server and that the app says so, counts down and retries on its own.
 - **The browser packs the heatmap exactly as the server does.** The backend's tests write
-  Open-Meteo answers, with rounding ties on purpose, and the texture the server packs from
-  them ([`test_heatmap_parity.py`](backend/planner/tests/test_heatmap_parity.py)). Vitest
+  Open-Meteo answers, with rounding ties and band edges on purpose, and the texture the
+  server packs from them ([`test_heatmap_parity.py`](backend/planner/tests/test_heatmap_parity.py)). Vitest
   checks the browser packs identical bytes
   ([`heatmapParity.test.ts`](frontend/src/lib/heatmapParity.test.ts)), and the backend
   checks its fixture is current.
