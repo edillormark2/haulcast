@@ -163,9 +163,9 @@ export class HeatmapLayer implements CustomLayerInterface {
     gl.uniform1f(u.u_frame, Math.min(Math.max(this.frame, 0), data.frames - 1))
     gl.uniform1f(u.u_frames, data.frames)
     gl.uniform3f(u.u_steps, steps.wind, steps.rain, steps.snow)
-    gl.uniform4fv(u.u_wind_bounds, shaderBounds(thresholds.wind, steps.wind))
-    gl.uniform4fv(u.u_rain_bounds, shaderBounds(thresholds.rain, steps.rain))
-    gl.uniform4fv(u.u_snow_bounds, shaderBounds(thresholds.snow, steps.snow))
+    gl.uniform4fv(u.u_wind_bounds, shaderBounds(thresholds.wind, 'wind'))
+    gl.uniform4fv(u.u_rain_bounds, shaderBounds(thresholds.rain, 'rain'))
+    gl.uniform4fv(u.u_snow_bounds, shaderBounds(thresholds.snow, 'snow'))
     gl.uniform3f(
       u.u_no_travel_inclusive,
       Number(thresholds.wind.no_travel_inclusive),

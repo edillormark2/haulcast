@@ -1,6 +1,14 @@
+import type { Factor } from '../api/types'
 import { HOUR_MS } from './time'
 
 const HOUR_S = HOUR_MS / 1000
+
+/**
+ * Decimals a reading is shown to: 0.1 mph, 0.01 in/hr. Readings are rounded to
+ * them before they're classified, here and on the server, so a value on screen
+ * always matches its band.
+ */
+export const DECIMALS: Record<Factor, number> = { wind: 1, rain: 2, snow: 2 }
 
 /**
  * Hourly forecast for one place, as the server reads it
@@ -46,10 +54,18 @@ export function conditionsAt(series: HourlySeries, timestampS: number): Conditio
     throw new RangeError(`No forecast for ${new Date(timestampS * 1000).toISOString()}`)
   }
   const fraction = offsetH - hour
+  return roundReadings({ wind: windBefore + (windAfter - windBefore) * fraction, rain, snow })
+}
+
+/**
+ * Readings rounded to the decimals the UI shows, halves to even, as the
+ * server's `Conditions.measured` rounds them.
+ */
+export function roundReadings({ wind, rain, snow }: Conditions): Conditions {
   return {
-    wind: roundHalfEven(windBefore + (windAfter - windBefore) * fraction, 1),
-    rain: roundHalfEven(rain, 2),
-    snow: roundHalfEven(snow, 2),
+    wind: roundHalfEven(wind, DECIMALS.wind),
+    rain: roundHalfEven(rain, DECIMALS.rain),
+    snow: roundHalfEven(snow, DECIMALS.snow),
   }
 }
 

@@ -76,7 +76,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 | --- | --- | --- |
 | `uv run pytest` | `backend/` | 164 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 114 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
+| `npm test` | `frontend/` | 115 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
 | `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
@@ -236,12 +236,17 @@ The recommendation comes with:
 - **Values on a threshold.** Packing rounds down, so readings of 35.0–35.4 mph all land
   exactly on 35.0. Each band edge is antialiased on the side its threshold doesn't belong
   to (below 35 mph, above 1.00 in/hr of rain), so such a cell is drawn wholly in its
-  band, No Travel hatching included, rather than half in the band below, and band edges
-  fall where the hover readout puts them. The shader's thresholds move 1% of a byte step
-  that way to absorb float32 error (0.10 in/hr of rain comes out a hair under 0.10).
+  band, No Travel hatching included, rather than half in the band below. The shader's
+  thresholds move half the last digit a reading shows that way (34.95 mph, 1.005 in/hr),
+  where a reading, rounded, crosses into the next band, so band edges fall exactly where
+  the hover readout puts them. Every byte stays at least half a digit inside its band, far
+  beyond float32 error.
 - **No colour-only cues.** No Travel gets road-closed hatching, and the same colours mean
   the same bands in the Risk, Wind, Rain and Snow views.
-- **Hover readouts** use a CPU copy of the same maths ([`heatmap.ts`](frontend/src/lib/heatmap.ts)).
+- **Hover readouts** use a CPU copy of the same maths ([`heatmap.ts`](frontend/src/lib/heatmap.ts)),
+  rounded to the digit shown, as checkpoints round theirs, before they're classified. Just
+  off a 45.0 mph peak the field is a hair under 45; it reads 45.0 mph and No Travel (at
+  42,000 lb), as the map draws it, rather than Severe.
 - **Playback plays the trip.** The slider covers the full 0–48 h forecast, and **Play**
   drives the selected route from departure to arrival while the weather moves with it.
   Any trip takes 10–20 s to play (a three-hour haul takes ten), stops at arrival, and

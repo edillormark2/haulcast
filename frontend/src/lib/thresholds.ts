@@ -1,13 +1,8 @@
 import type { Factor, Thresholds } from '../api/types'
+import { DECIMALS } from './forecast'
 import { RISK_LEVELS, type RiskLevel } from './risk'
 
 const FACTORS: readonly Factor[] = ['wind', 'rain', 'snow']
-/**
- * How far `shaderBounds` moves each bound, as a share of a quantisation step.
- * Float32 puts the shader's byte values up to about 0.00002 of a step off
- * (0.10 in/hr of rain comes out just under 0.10), and no pixel shows 0.01.
- */
-const SHADER_ALLOWANCE = 0.01
 
 /** Risk level of one reading against its factor's bands. */
 export function levelFor(value: number, thresholds: Thresholds): RiskLevel {
@@ -39,21 +34,23 @@ export function overallLevel(
 /**
  * Bounds for GPU classification. The shader antialiases each band edge on the
  * side of the bound that the bound doesn't belong to: below an inclusive
- * bound, above an exclusive one. So a value on a bound is drawn wholly in the
- * band `levelFor` gives it, and band edges are where the hover readout puts
- * them. Each bound also moves 1% of a quantisation step that way, which
- * absorbs float32 error in the shader's byte values.
+ * bound, above an exclusive one. Each bound also moves that way by half the
+ * last digit a reading shows (0.05 mph, 0.005 in/hr), where rounding carries
+ * a value onto it or past it: 44.95 mph reads 45.0, 1.006 in/hr reads 1.01.
+ * So the shader draws each value in the band the hover readout gives it,
+ * rounded. Every byte sits at least half a digit inside its band, so one on a
+ * threshold is drawn wholly in that band at any slope.
  */
 export function shaderBounds(
   thresholds: Thresholds,
-  step: number,
+  factor: Factor,
 ): [number, number, number, number] {
   const [moderate, high, severe, noTravel] = thresholds.bounds
-  const allowance = step * SHADER_ALLOWANCE
+  const halfDigit = 10 ** -DECIMALS[factor] / 2
   return [
-    moderate - allowance,
-    high - allowance,
-    severe - allowance,
-    thresholds.no_travel_inclusive ? noTravel - allowance : noTravel + allowance,
+    moderate - halfDigit,
+    high - halfDigit,
+    severe - halfDigit,
+    thresholds.no_travel_inclusive ? noTravel - halfDigit : noTravel + halfDigit,
   ]
 }

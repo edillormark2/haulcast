@@ -1,5 +1,6 @@
 import type { Factor, Thresholds } from '../api/types'
 import { decodeHeatmap, frameAt, type HeatmapData, sampleHeatmap } from './heatmap'
+import { overallLevel } from './thresholds'
 
 const thresholds: Record<Factor, Thresholds> = {
   wind: { unit: 'mph', bounds: [25, 35, 45, 55], no_travel_inclusive: true },
@@ -43,6 +44,19 @@ describe('sampleHeatmap', () => {
   it('blends linearly between hours', () => {
     const data = grid((_, __, frame) => (frame === 0 ? 40 : 80))
     expect(sampleHeatmap(data, 1.5, 1.5, 0.25)?.wind).toBeCloseTo(50 * 0.5)
+  })
+
+  it('reads a peak on a threshold in the band the map draws there', () => {
+    // A 55.0 mph cell among 50 mph ones. Just off its centre the field is a
+    // hair under 55: rounded like a checkpoint's reading, it shows 55.0 and is
+    // No Travel, as drawn. Farther out it shows 54.9, Severe.
+    const data = grid((column, row) => (column === 1 && row === 1 ? 110 : 100))
+    const near = sampleHeatmap(data, 1.02, 1.01, 0)
+    expect(near).toEqual({ wind: 55, rain: 0.1, snow: 0 })
+    expect(near && overallLevel(near, thresholds)).toBe('no_travel')
+    const farther = sampleHeatmap(data, 1.1, 1, 0)
+    expect(farther?.wind).toBe(54.9)
+    expect(farther && overallLevel(farther, thresholds)).toBe('severe')
   })
 
   it('never overshoots the nearest cells', () => {

@@ -1,5 +1,5 @@
 import type { Factor, HeatmapLayout, HeatmapPayload, Thresholds } from '../api/types'
-import { conditionsAt, type HourlySeries } from './forecast'
+import { conditionsAt, type HourlySeries, roundReadings } from './forecast'
 import { HOUR_MS } from './time'
 
 const HOUR_S = HOUR_MS / 1000
@@ -149,7 +149,10 @@ export type WeatherSample = Record<Factor, number>
  * Weather at a point and fractional frame, computed exactly as the WebGL
  * layer draws it: each cell blended between the two surrounding hours, then a
  * Catmull-Rom interpolation across the 4×4 nearest cells, clamped to the four
- * nearest. Null outside the corridor.
+ * nearest. Then rounded like a checkpoint's reading, so the value shown is the
+ * one classified and its band is the one drawn there (`shaderBounds`): just off
+ * a 45.0 mph peak the field is a hair under 45, and reads 45.0. Null outside
+ * the corridor.
  */
 export function sampleHeatmap(
   data: HeatmapData,
@@ -196,11 +199,11 @@ export function sampleHeatmap(
 
   const [wind = 0, rain = 0, snow = 0, corridor = 0] = channels
   if (corridor < 128) return null
-  return {
+  return roundReadings({
     wind: wind * data.steps.wind,
     rain: rain * data.steps.rain,
     snow: snow * data.steps.snow,
-  }
+  })
 }
 
 function catmullRomWeights(t: number): [number, number, number, number] {
