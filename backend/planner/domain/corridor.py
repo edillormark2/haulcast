@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from planner.domain.geometry import MILES_PER_DEGREE_LAT, Coordinate, Polyline
@@ -55,6 +55,28 @@ class Corridor:
     def cell_indices(self) -> list[int]:
         """Cells inside the corridor, which need forecasts."""
         return [i for i, d in enumerate(self.distances_mi) if d <= self.buffer_mi]
+
+    def sample_points(self, anchors: Iterable[Coordinate]) -> dict[int, Coordinate]:
+        """Where to read each corridor cell's forecast: the anchor inside the
+        cell nearest its centre when there is one, otherwise the centre. A
+        cell is a point sample of the weather either way; reading it at an
+        anchor lets it reuse a forecast already fetched for that point."""
+        grid = self.grid
+        samples = {index: grid.point(index) for index in self.cell_indices}
+        offsets: dict[int, float] = {}
+        for anchor in anchors:
+            row_f = (anchor.lat - grid.south) / grid.lat_step
+            column_f = (anchor.lon - grid.west) / grid.lon_step
+            row, column = round(row_f), round(column_f)
+            if not (0 <= row < grid.rows and 0 <= column < grid.columns):
+                continue
+            index = row * grid.columns + column
+            # In cell units: cells are about square in miles.
+            offset = math.hypot(row_f - row, column_f - column)
+            if index in samples and offset < offsets.get(index, math.inf):
+                samples[index] = anchor
+                offsets[index] = offset
+        return samples
 
     def weight(self, index: int) -> float:
         """1 near a route, fading to 0 at the corridor edge."""

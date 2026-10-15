@@ -12,7 +12,7 @@ import pytest
 import respx
 from django.core.cache import caches
 
-from planner.integrations import osrm, valhalla
+from planner.integrations import http, osrm, valhalla
 from planner.integrations.http import HostThrottle
 
 VALHALLA_ROUTE = "https://valhalla1.openstreetmap.de/route"
@@ -68,14 +68,30 @@ def valhalla_trip(lat: float, road: str, hours: float) -> dict[str, Any]:
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fresh caches and no fair-use sleeps in every test."""
+    """Fresh caches and no fair-use or retry sleeps in every test."""
     monkeypatch.setattr(valhalla, "_throttle", HostThrottle(min_interval_s=0))
     monkeypatch.setattr(osrm, "_throttle", HostThrottle(min_interval_s=0))
+    monkeypatch.setattr(http, "_backoff_s", lambda attempt: 0)
     for alias in ("default", "routes"):
         caches[alias].clear()
 
 
 WeatherFn = Callable[[float, float], dict[str, float]]
+
+
+def refusal(reason: str) -> httpx.Response:
+    """A 429 as Open-Meteo sends it, e.g. "Minutely API request limit exceeded."."""
+    return httpx.Response(429, json={"error": True, "reason": reason})
+
+
+def requested_points(route: respx.Route) -> list[tuple[float, float]]:
+    """Every (lat, lon) the app asked Open-Meteo for through `route`."""
+    points = []
+    for call in route.calls:
+        params = call.request.url.params
+        lats, lons = params["latitude"].split(","), params["longitude"].split(",")
+        points += [(float(lat), float(lon)) for lat, lon in zip(lats, lons, strict=True)]
+    return points
 
 
 @pytest.fixture
@@ -97,7 +113,9 @@ def upstream() -> Iterator[Callable[[WeatherFn], respx.MockRouter]]:
                     },
                 )
             )
-            router.get(OPEN_METEO).mock(side_effect=lambda request: _forecast(request, weather))
+            router.get(OPEN_METEO, name="open_meteo").mock(
+                side_effect=lambda request: _forecast(request, weather)
+            )
             return router
 
         yield install

@@ -54,16 +54,20 @@ class TripRequestSerializer(serializers.Serializer[dict[str, Any]]):
         return attrs
 
 
+def _lon_lat_field(**kwargs: Any) -> serializers.ListField:
+    return serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=2, max_length=2),
+        **kwargs,
+    )
+
+
 class HeatmapRequestSerializer(serializers.Serializer[dict[str, Any]]):
     corridor = serializers.ListField(
-        child=serializers.ListField(
-            child=serializers.ListField(child=serializers.FloatField(), min_length=2, max_length=2),
-            min_length=2,
-            max_length=2_000,
-        ),
-        min_length=1,
-        max_length=3,
+        child=_lon_lat_field(min_length=2, max_length=2_000), min_length=1, max_length=3
     )
+    anchors = _lon_lat_field(max_length=2_000, default=list)
+    """Checkpoint cells the plan already fetched (optional). Each corridor cell
+    is still read at one point, so anchors can't add forecast calls."""
     departure = serializers.DateTimeField()
     load_lb = serializers.IntegerField(min_value=0, max_value=MAX_LOAD_LB)
 

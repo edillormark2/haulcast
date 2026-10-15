@@ -10,11 +10,14 @@ import {
 } from '@phosphor-icons/react'
 import { useMemo } from 'react'
 
+import { ApiError } from '../../api/client'
+import type { BusyRetry } from '../../api/queries'
 import type { HeatmapMetric, Plan, Route } from '../../api/types'
 import { cx } from '../../lib/cx'
 import { formatClock, formatDuration, formatHour } from '../../lib/format'
 import { HOUR_MS } from '../../lib/time'
 import { ARRIVAL_EPSILON_H, FORECAST_HOURS, useUiStore } from '../../state/uiStore'
+import { RetryNotice } from '../../ui/RetryNotice'
 import { Segmented } from '../../ui/Segmented'
 import { Legend } from './Legend'
 
@@ -29,6 +32,9 @@ interface ForecastBarProps {
   plan: Plan
   departureMs: number
   heatmapStatus: 'pending' | 'error' | 'success'
+  heatmapError: Error | null
+  /** Set while a busy service makes the heatmap wait for an automatic retry. */
+  heatmapRetry: BusyRetry | null
   onRetry: () => void
   compact?: boolean
 }
@@ -38,6 +44,8 @@ export function ForecastBar({
   plan,
   departureMs,
   heatmapStatus,
+  heatmapError,
+  heatmapRetry,
   onRetry,
   compact = false,
 }: ForecastBarProps) {
@@ -48,16 +56,26 @@ export function ForecastBar({
   const selectedRouteId = useUiStore((state) => state.selectedRouteId)
   const route = plan.routes.find((r) => r.id === selectedRouteId)
 
-  const status =
-    heatmapStatus === 'pending' ? (
-      <p className="flex items-center gap-1.5 text-2xs text-fg-muted">
-        <CircleNotchIcon size={13} className="animate-spin" aria-hidden />
-        Loading the 48-hour forecast along the corridor…
-      </p>
-    ) : heatmapStatus === 'error' ? (
-      <p className="flex items-center gap-1.5 text-2xs text-risk-severe-text">
-        <WarningCircleIcon size={14} aria-hidden />
+  const status = heatmapRetry ? (
+    <RetryNotice
+      compact
+      retry={heatmapRetry}
+      onRetryNow={onRetry}
+      className="text-2xs leading-snug text-fg-muted"
+    >
+      {heatmapRetry.service} is busy, so the forecast map has to wait.
+    </RetryNotice>
+  ) : heatmapStatus === 'pending' ? (
+    <p className="flex items-center gap-1.5 text-2xs text-fg-muted">
+      <CircleNotchIcon size={13} className="animate-spin" aria-hidden />
+      Loading the 48-hour forecast along the corridor…
+    </p>
+  ) : heatmapStatus === 'error' ? (
+    <p className="flex items-center gap-1.5 text-2xs text-risk-severe-text">
+      <WarningCircleIcon size={14} className="shrink-0" aria-hidden />
+      <span>
         Couldn&apos;t load the forecast map.
+        {heatmapError instanceof ApiError && heatmapError.busy && ` ${heatmapError.message}`}{' '}
         <button
           type="button"
           onClick={onRetry}
@@ -65,10 +83,11 @@ export function ForecastBar({
         >
           Retry
         </button>
-      </p>
-    ) : (
-      <Legend metric={metric} thresholds={plan.thresholds} />
-    )
+      </span>
+    </p>
+  ) : (
+    <Legend metric={metric} thresholds={plan.thresholds} />
+  )
 
   return (
     <section

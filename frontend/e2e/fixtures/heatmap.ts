@@ -45,6 +45,11 @@ export function heatmapFor(request: HeatmapRequest): HeatmapPayload {
     steps: STEPS,
     thresholds: THRESHOLDS,
     data: Buffer.from(bytes).toString('base64'),
-    meta: { forecast_cells: COLUMNS * ROWS, timings_ms: { forecast: 620, total: 655 } },
+    meta: {
+      forecast_cells: COLUMNS * ROWS,
+      fetched_cells: COLUMNS * ROWS,
+      stale_since: null,
+      timings_ms: { forecast: 620, total: 655 },
+    },
   }
 }

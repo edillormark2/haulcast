@@ -2,10 +2,12 @@ import { Tabs } from '@base-ui/react/tabs'
 import { ArrowLeftIcon, CircleNotchIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 
+import type { BusyRetry } from '../../api/queries'
 import type { Plan, TripRequest } from '../../api/types'
 import { cx } from '../../lib/cx'
 import { type PanelTab, useUiStore } from '../../state/uiStore'
 import { Button } from '../../ui/Button'
+import { RetryNotice } from '../../ui/RetryNotice'
 import { CheckpointList } from '../checkpoints/CheckpointList'
 import { RecommendationCard } from '../routes/RecommendationCard'
 import { RouteList } from '../routes/RouteList'
@@ -24,6 +26,8 @@ export interface PlanQueryState {
   /** Fetching a new plan while the previous one stays on screen. */
   refreshing: boolean
   error: Error | null
+  /** Set while a busy service makes the plan wait for an automatic retry. */
+  busy: BusyRetry | null
   retry: () => void
 }
 
@@ -89,7 +93,9 @@ function Results({
 
   if (!trip) return <EmptyState onTry={onTry} />
   if (query.error && !query.plan) return <ErrorState error={query.error} onRetry={query.retry} />
-  if (!query.plan) return <LoadingState interval={trip.interval_mi} />
+  if (!query.plan) {
+    return <LoadingState interval={trip.interval_mi} retry={query.busy} onRetryNow={query.retry} />
+  }
 
   const { plan } = query
   const departureMs = Date.parse(plan.trip.departure)
@@ -116,6 +122,16 @@ function Results({
           </span>
         )}
       </Tabs.List>
+      {query.refreshing && query.busy && (
+        <RetryNotice
+          compact
+          retry={query.busy}
+          onRetryNow={query.retry}
+          className="mb-4 text-xs leading-snug text-fg-muted"
+        >
+          {query.busy.service} is busy right now, so the update has to wait.
+        </RetryNotice>
+      )}
       <div className={cx('transition-opacity duration-200', query.refreshing && 'opacity-60')}>
         <Tabs.Panel
           value="routes"

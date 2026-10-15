@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from functools import cache
 from types import TracebackType
 from typing import Any
@@ -21,13 +22,28 @@ MAX_BACKOFF_S = 4.0
 
 
 class UpstreamError(Exception):
-    """An upstream service failed or returned something unusable."""
+    """An upstream service failed or returned something unusable.
 
-    def __init__(self, service: str, detail: str, *, status: int | None = None) -> None:
+    `retry_after_s` is set when the service said how long a refusal lasts.
+    """
+
+    def __init__(
+        self,
+        service: str,
+        detail: str,
+        *,
+        status: int | None = None,
+        retry_after_s: float | None = None,
+    ) -> None:
         super().__init__(f"{service}: {detail}")
         self.service = service
         self.detail = detail
         self.status = status
+        self.retry_after_s = retry_after_s
+
+    @property
+    def rate_limited(self) -> bool:
+        return self.status == httpx.codes.TOO_MANY_REQUESTS
 
 
 class HostThrottle:
@@ -67,11 +83,27 @@ def shared_client() -> httpx.Client:
     )
 
 
-def request_json(service: str, method: str, url: str, **kwargs: Any) -> Any:
+def retry_after_header(response: httpx.Response) -> float | None:
+    """Seconds to wait from a numeric Retry-After header, if there is one."""
+    value = response.headers.get("Retry-After", "")
+    return float(value) if value.isdigit() else None
+
+
+def request_json(
+    service: str,
+    method: str,
+    url: str,
+    *,
+    retry_after: Callable[[httpx.Response], float | None] = retry_after_header,
+    **kwargs: Any,
+) -> Any:
     """Send a request and decode its JSON body.
 
     Rate limits, gateway errors and timeouts are retried with exponential
-    backoff (honouring Retry-After); anything else fails fast as UpstreamError.
+    backoff, or after the wait `retry_after` reads from the response. A wait
+    longer than MAX_BACKOFF_S, such as a used-up quota, can't pass within one
+    request, so it's raised at once with the wait attached. Anything else
+    fails fast as UpstreamError.
     """
     for attempt in range(1, MAX_ATTEMPTS + 1):
         started = time.perf_counter()
@@ -80,7 +112,7 @@ def request_json(service: str, method: str, url: str, **kwargs: Any) -> Any:
         except httpx.TimeoutException as exc:
             if attempt == MAX_ATTEMPTS:
                 raise UpstreamError(service, "timed out") from exc
-            _sleep_before_retry(attempt, None)
+            time.sleep(_backoff_s(attempt))
             continue
         except httpx.HTTPError as exc:
             raise UpstreamError(service, f"request failed ({exc.__class__.__name__})") from exc
@@ -90,9 +122,17 @@ def request_json(service: str, method: str, url: str, **kwargs: Any) -> Any:
             "%s %s %s → %s in %.0f ms", service, method, url, response.status_code, elapsed_ms
         )
 
-        if response.status_code in RETRYABLE_STATUSES and attempt < MAX_ATTEMPTS:
-            _sleep_before_retry(attempt, response.headers.get("Retry-After"))
-            continue
+        if response.status_code in RETRYABLE_STATUSES:
+            wait = retry_after(response)
+            if attempt < MAX_ATTEMPTS and (wait is None or wait <= MAX_BACKOFF_S):
+                time.sleep(_backoff_s(attempt) if wait is None else wait)
+                continue
+            raise UpstreamError(
+                service,
+                _error_detail(response),
+                status=response.status_code,
+                retry_after_s=wait,
+            )
         if response.is_error:
             raise UpstreamError(service, _error_detail(response), status=response.status_code)
         try:
@@ -102,11 +142,8 @@ def request_json(service: str, method: str, url: str, **kwargs: Any) -> Any:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _sleep_before_retry(attempt: int, retry_after: str | None) -> None:
-    delay = 0.5 * 2 ** (attempt - 1)
-    if retry_after and retry_after.isdigit():
-        delay = float(retry_after)
-    time.sleep(min(delay, MAX_BACKOFF_S))
+def _backoff_s(attempt: int) -> float:
+    return min(0.5 * 2.0 ** (attempt - 1), MAX_BACKOFF_S)
 
 
 def _error_detail(response: httpx.Response) -> str:

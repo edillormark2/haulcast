@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -20,14 +20,21 @@ from planner.domain.corridor import Corridor, build_corridor
 from planner.domain.forecast import HOUR_S
 from planner.domain.geometry import Coordinate, Polyline
 from planner.domain.risk import BandScale, Factor, scales_for_load
-from planner.services.forecasts import ForecastWindow, fetch_forecasts
+from planner.services.forecasts import HORIZON_HOURS, ForecastWindow, fetch_forecasts
 
-SLIDER_HOURS = 48
+SLIDER_HOURS = HORIZON_HOURS
+"""The slider spans the shared forecast horizon, so a heatmap reads the same
+forecast window, and cache entries, as its plan."""
 FRAME_COUNT = SLIDER_HOURS + 1
 CORRIDOR_BUFFER_MI = 35
 MAX_FORECAST_CELLS = 220
-"""Keeps one heatmap well inside Open-Meteo's free 600 calls/minute."""
+"""Open-Meteo charges one call per cell, from a free budget of 600 a minute."""
 MIN_STEP_DEG, MAX_STEP_DEG = 0.1, 0.6
+ANCHOR_INTERVAL_MI = 50
+"""Cells the routes cross are read at the plan's checkpoints on whole
+multiples of 50 miles, and at each destination. Every checkpoint interval
+(10, 25 or 50 mi) includes those, so after any plan their forecasts are
+cached, and the heatmap is the same whichever interval was chosen."""
 
 STEP: dict[Factor, float] = {Factor.WIND: 0.5, Factor.RAIN: 0.01, Factor.SNOW: 0.02}
 """Value of one byte step per channel. Every risk threshold lands on a whole byte."""
@@ -42,12 +49,19 @@ class Heatmap:
     """`frames` × rows × columns × RGBA bytes: wind, rain, snow, corridor weight."""
     scales: dict[Factor, BandScale]
     forecast_cells: int
+    fetched_cells: int
+    stale_since: float | None
     timings_ms: dict[str, int]
 
 
 def build_heatmap(
-    lines: Sequence[Sequence[Coordinate]], departure: datetime, load_lb: int
+    lines: Sequence[Sequence[Coordinate]],
+    departure: datetime,
+    load_lb: int,
+    anchors: Iterable[Coordinate] = (),
 ) -> Heatmap:
+    """`anchors` are the plan's checkpoints every ANCHOR_INTERVAL_MI miles,
+    whose forecasts the plan has already fetched."""
     started = time.perf_counter()
     corridor = build_corridor(
         [Polyline.from_points(line) for line in lines],
@@ -56,16 +70,17 @@ def build_heatmap(
         min_step_deg=MIN_STEP_DEG,
         max_step_deg=MAX_STEP_DEG,
     )
-    grid, cells = corridor.grid, corridor.cell_indices
+    grid = corridor.grid
+    samples = corridor.sample_points(anchors)
     departure_ts = departure.timestamp()
     forecasts = fetch_forecasts(
-        (grid.point(i) for i in cells), ForecastWindow.covering(departure_ts, SLIDER_HOURS)
+        samples.values(), ForecastWindow.covering(departure_ts, SLIDER_HOURS)
     )
     fetched = time.perf_counter()
 
     data = bytearray(FRAME_COUNT * grid.size * 4)
-    for cell in cells:
-        series = forecasts[grid.point(cell)]
+    for cell, point in samples.items():
+        series = forecasts[point]
         for frame in range(FRAME_COUNT):
             conditions = series.conditions_at(departure_ts + frame * HOUR_S)
             offset = (frame * grid.size + cell) * 4
@@ -95,6 +110,8 @@ def build_heatmap(
         data_b64=base64.b64encode(bytes(data)).decode("ascii"),
         scales=scales_for_load(load_lb),
         forecast_cells=forecasts.cell_count,
+        fetched_cells=forecasts.fetched,
+        stale_since=forecasts.stale_since,
         timings_ms={
             "weather": round((fetched - started) * 1000),
             "total": round((finished - started) * 1000),

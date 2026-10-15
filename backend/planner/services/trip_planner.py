@@ -62,6 +62,9 @@ class TripPlan:
     routes: tuple[RoutePlan, ...]
     recommendation: Recommendation
     forecast_cells: int
+    fetched_cells: int
+    stale_since: float | None
+    """Set when Open-Meteo failed and older cached forecasts stood in."""
     timings_ms: dict[str, int]
 
 
@@ -77,6 +80,8 @@ def plan_trip(request: TripRequest) -> TripPlan:
         option.route_id: _place(option, departure_ts, request.interval_mi) for option in options
     }
     longest_trip_h = max(option.duration_s for option in options) / 3600
+    # The window also covers the heatmap's 48 hours, so the heatmap can reuse
+    # these checkpoints' forecasts.
     forecasts = fetch_forecasts(
         (placement.coordinate for route in placements.values() for placement in route),
         ForecastWindow.covering(departure_ts, longest_trip_h),
@@ -104,6 +109,8 @@ def plan_trip(request: TripRequest) -> TripPlan:
         routes=routes,
         recommendation=recommendation,
         forecast_cells=forecasts.cell_count,
+        fetched_cells=forecasts.fetched,
+        stale_since=forecasts.stale_since,
         timings_ms={
             "routing": _ms(started, routed),
             "weather": _ms(routed, forecasted),
