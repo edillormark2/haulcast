@@ -16,7 +16,7 @@ main decisions went the way they did.
 | Calculate weather risk using the risk/load rules | [`risk.py`](../backend/planner/domain/risk.py): table-driven bands, explicit boundary conventions, load rules as data |
 | Recommend the best route, balancing risk and travel time | [`recommendation.py`](../backend/planner/domain/recommendation.py): No Travel gate, then the brief's four criteria in order; reason sentence and a "Not chosen" verdict for each route |
 | Show routes, checkpoints, risk levels, ETAs and summaries on a map | Risk-coloured route lines, checkpoint dots with hover/click cards (ETA, readings, reason), route pills with travel time, truck marker; summaries and strips in the panel |
-| Weather heatmap along the corridor with a 0–48 h slider | Corridor grid and hourly frames ([`heatmap.py`](../backend/planner/services/heatmap.py)); WebGL2 layer ([`HeatmapLayer.ts`](../frontend/src/features/map/heatmap/HeatmapLayer.ts)); timeline with play/scrub ([`ForecastBar.tsx`](../frontend/src/features/forecast/ForecastBar.tsx)) |
+| Weather heatmap along the corridor with a 0–48 h slider | Corridor grid laid out by the plan ([`heatmap.py`](../backend/planner/services/heatmap.py)), hourly frames fetched and packed in the browser ([`openMeteo.ts`](../frontend/src/api/openMeteo.ts), [`heatmap.ts`](../frontend/src/lib/heatmap.ts)); WebGL2 layer ([`HeatmapLayer.ts`](../frontend/src/features/map/heatmap/HeatmapLayer.ts)); timeline with play/scrub ([`ForecastBar.tsx`](../frontend/src/features/forecast/ForecastBar.tsx)) |
 | Deliverables: repository, hosted app, Loom | This repository; Vercel config in [`vercel.json`](../vercel.json); script in [`WALKTHROUGH.md`](WALKTHROUGH.md) |
 
 ## Against the evaluation criteria
@@ -61,7 +61,7 @@ main decisions went the way they did.
   - **Layer order.** Weather sits under roads and route lines under labels.
 - **Delivery is fast.**
   - A static shell in `index.html` paints the layout before any JavaScript runs.
-  - The app's own code is 36 kB gzipped. MapLibre is a lazy chunk, preloaded at low
+  - The app's own code is 38 kB gzipped. MapLibre is a lazy chunk, preloaded at low
     priority, so the panel works while the map downloads. Vendor chunks cache separately.
   - Fonts are self-hosted, and the Latin subset is preloaded.
   - The API function runs in Frankfurt, beside its upstream services, and the CDN caches
@@ -71,6 +71,8 @@ main decisions went the way they did.
   countdown to an automatic retry.
   - API responses are compact: geometry is simplified to about 30 m, and the heatmap is
     one base64 byte array.
+  - The heatmap needs no second server request: the plan carries its layout, and the
+    browser fetches the forecasts straight from Open-Meteo.
 - **Motion is purposeful.**
   - A camera ease-out frames the new routes.
   - Route rows slide in once per plan.
@@ -105,6 +107,7 @@ main decisions went the way they did.
 | Clamped Catmull-Rom spatial interpolation | Bilinear, B-spline | Round contours, exact at cells, never beyond the data (a B-spline would understate peaks) |
 | One forecast window per 6-hour departure block, shared by the plan and its heatmap | A window per request | Open-Meteo's free tier charges per location, not per hour, so the longer window is free, and the heatmap, coarser intervals and nearby departures reuse its forecasts |
 | Heatmap cells read at the plan's 50-mile checkpoints when they contain one | Always at the cell centre | 30–54% fewer heatmap calls on the sample trips, for about the accuracy of one coarser grid step (measured against a finer grid over 49 frames) |
+| Heatmap forecasts fetched by the viewer's browser, the server as fallback | The server fetching them | Each viewer spends their own Open-Meteo quota instead of the function's shared egress IP, so the server pays for plans only (100–136 calls per sample trip instead of 260–350). The browser packs the same bytes as the server (a shared fixture checks), at the cost of a copy of the packing code and viewers' IPs reaching Open-Meteo |
 | Busy services answered with `retry_after`, retried by the browser with a countdown | Retrying inside the request | A per-minute limit can outlast any request; the user sees what is happening and can try at once |
 | Stateless API with the trip in the URL | Persisting plans in a database | Shareable links, any instance serves any request, nothing to migrate; forecasts are refreshed on every visit |
 | MapLibre directly (no React wrapper) | react-map-gl | Full control of a custom WebGL layer under MapLibre 6; fewer moving parts |

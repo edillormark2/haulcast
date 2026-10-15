@@ -1,8 +1,14 @@
 import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query'
 
-import { decodeHeatmap } from '../lib/heatmap'
+import {
+  decodeHeatmap,
+  type HeatmapData,
+  heatmapFromForecasts,
+  samplesToFetch,
+} from '../lib/heatmap'
 import { ApiError, api } from './client'
-import type { HeatmapRequest, TripRequest } from './types'
+import { fetchForecasts } from './openMeteo'
+import type { Plan, TripRequest } from './types'
 
 const MINUTE = 60_000
 /** A busy service is retried this many times, after the wait it asks for… */
@@ -105,14 +111,31 @@ function sameJourney(a: TripRequest, b: TripRequest): boolean {
   )
 }
 
-export function useHeatmap(heatmapRequest: HeatmapRequest | undefined) {
+/**
+ * The corridor heatmap. The browser builds it: the plan has packed the cells
+ * read at its checkpoints, and the rest come straight from Open-Meteo, out of
+ * the viewer's free quota rather than the server's. If that fails for any
+ * reason (blocked, refused, unreachable), the server fetches the whole
+ * heatmap instead, and a busy server is retried like a plan.
+ */
+export function useHeatmap(plan: Plan | undefined) {
   return useQuery({
-    queryKey: ['heatmap', heatmapRequest],
-    queryFn: () => api.heatmap(heatmapRequest as HeatmapRequest),
-    enabled: heatmapRequest !== undefined,
+    // The same at every checkpoint interval, so changing it keeps the heatmap.
+    queryKey: ['heatmap', plan?.heatmap_request],
+    queryFn: () => loadHeatmap(plan as Plan),
+    enabled: plan !== undefined,
     staleTime: 10 * MINUTE,
     retry: shouldRetry,
     retryDelay,
-    select: decodeHeatmap,
   })
+}
+
+export async function loadHeatmap(plan: Plan): Promise<HeatmapData> {
+  const layout = plan.heatmap_layout
+  try {
+    const series = await fetchForecasts(layout.forecast, samplesToFetch(layout))
+    return heatmapFromForecasts(layout, series, plan.thresholds)
+  } catch {
+    return decodeHeatmap(await api.heatmap(plan.heatmap_request))
+  }
 }

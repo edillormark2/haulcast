@@ -32,6 +32,11 @@ Refused requests aren't counted, so trying early costs nothing."""
 DAY_S = 24 * HOUR_S
 
 
+def forecast_url() -> str:
+    """The forecast endpoint. Browsers call it too, for the heatmap."""
+    return f"{conf.upstream().open_meteo_url}/v1/forecast"
+
+
 def fetch_hourly(points: Sequence[Coordinate], start: int, end: int) -> list[HourlySeries]:
     """Hourly series from `start` to `end` (inclusive, UTC unix seconds on the
     hour) for each point, in the same order as `points`."""
@@ -51,8 +56,7 @@ def fetch_hourly(points: Sequence[Coordinate], start: int, end: int) -> list[Hou
         "start_hour": _iso_hour(start),
         "end_hour": _iso_hour(end),
     }
-    url = f"{conf.upstream().open_meteo_url}/v1/forecast"
-    payload = request_json(SERVICE, "GET", url, params=params, retry_after=_retry_after)
+    payload = request_json(SERVICE, "GET", forecast_url(), params=params, retry_after=_retry_after)
     locations = payload if isinstance(payload, list) else [payload]
     if len(locations) != len(points):
         raise UpstreamError(SERVICE, f"returned {len(locations)} locations for {len(points)}")

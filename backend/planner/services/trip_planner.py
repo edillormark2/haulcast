@@ -1,9 +1,11 @@
 """Plans a trip end to end: route options → checkpoints → weather at each
-checkpoint's ETA → risk → exposure per route → recommendation."""
+checkpoint's ETA → risk → exposure per route → recommendation, plus the
+layout of the corridor heatmap the browser fills in."""
 
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -16,7 +18,8 @@ from planner.domain.recommendation import (
     recommend,
 )
 from planner.domain.risk import Conditions, RiskAssessment, assess, describe
-from planner.services.forecasts import ForecastLookup, ForecastWindow, fetch_forecasts
+from planner.services.forecasts import ForecastLookup, ForecastWindow, fetch_forecasts, snap
+from planner.services.heatmap import ANCHOR_INTERVAL_MI, HeatmapPlan, plan_heatmap
 from planner.services.routing import RouteOption, find_route_options
 
 
@@ -65,6 +68,7 @@ class TripPlan:
     fetched_cells: int
     stale_since: float | None
     """Set when Open-Meteo failed and older cached forecasts stood in."""
+    heatmap: HeatmapPlan
     timings_ms: dict[str, int]
 
 
@@ -80,8 +84,8 @@ def plan_trip(request: TripRequest) -> TripPlan:
         option.route_id: _place(option, departure_ts, request.interval_mi) for option in options
     }
     longest_trip_h = max(option.duration_s for option in options) / 3600
-    # The window also covers the heatmap's 48 hours, so the heatmap can reuse
-    # these checkpoints' forecasts.
+    # The window also covers the heatmap's 48 hours, so the plan can pack the
+    # heatmap's cells at these checkpoints itself.
     forecasts = fetch_forecasts(
         (placement.coordinate for route in placements.values() for placement in route),
         ForecastWindow.covering(departure_ts, longest_trip_h),
@@ -103,6 +107,10 @@ def plan_trip(request: TripRequest) -> TripPlan:
             for route in routes
         ]
     )
+    recommended = time.perf_counter()
+    heatmap = plan_heatmap(
+        (route.option.line for route in routes), departure_ts, _heatmap_anchors(routes), forecasts
+    )
     finished = time.perf_counter()
     return TripPlan(
         request=request,
@@ -111,9 +119,11 @@ def plan_trip(request: TripRequest) -> TripPlan:
         forecast_cells=forecasts.cell_count,
         fetched_cells=forecasts.fetched,
         stale_since=forecasts.stale_since,
+        heatmap=heatmap,
         timings_ms={
             "routing": _ms(started, routed),
             "weather": _ms(routed, forecasted),
+            "heatmap": _ms(recommended, finished),
             "total": _ms(started, finished),
         },
     )
@@ -174,6 +184,18 @@ def _assess_route(
         exposure=exposure,
         arrival_ts=checkpoints[-1].eta_ts,
     )
+
+
+def _heatmap_anchors(routes: Sequence[RoutePlan]) -> list[Coordinate]:
+    """The forecast cells of the checkpoints the heatmap reads route cells at
+    (see heatmap.ANCHOR_INTERVAL_MI)."""
+    cells = dict.fromkeys(
+        snap(checkpoint.coordinate)
+        for route in routes
+        for checkpoint in route.checkpoints
+        if checkpoint.mile % ANCHOR_INTERVAL_MI == 0 or checkpoint is route.checkpoints[-1]
+    )
+    return list(cells)
 
 
 def _ms(start: float, end: float) -> int:

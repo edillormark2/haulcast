@@ -12,7 +12,7 @@ import respx
 from rest_framework.test import APIClient
 
 from planner.services import forecasts
-from planner.tests.conftest import VALHALLA_ROUTE, refusal, requested_points
+from planner.tests.conftest import OPEN_METEO, VALHALLA_ROUTE, refusal, requested_points
 
 DALLAS = {"label": "Dallas, TX", "lat": 32.0, "lon": -97.0}
 SHREVEPORT = {"label": "Somewhere east", "lat": 32.0, "lon": -95.0}
@@ -167,16 +167,49 @@ def test_heatmap_reuses_the_plans_checkpoint_forecasts(client: APIClient, upstre
     assert max(base64.b64decode(heatmap["data"])[0::4]) == 40  # 20 mph everywhere
 
 
-def test_heatmap_request_is_the_same_at_every_interval(client: APIClient, upstream: Any) -> None:
+def test_plan_lays_out_the_heatmap_for_the_browser(client: APIClient, upstream: Any) -> None:
+    router = upstream(lambda lat, lon: {"wind": 20.0})
+    plan = client.post("/api/plans/", plan_body(), format="json").json()
+
+    layout = plan["heatmap_layout"]
+    grid, frames = layout["grid"], layout["frames"]
+    anchor_frames = base64.b64decode(layout["anchor_frames"])
+    anchored = len(anchor_frames) // (frames * 3)
+    # The plan packs the cells read at its own checkpoints and fetches nothing
+    # more: the browser fetches the other samples from Open-Meteo itself.
+    assert len(requested_points(router["open_meteo"])) == plan["meta"]["fetched_cells"]
+    assert 0 < anchored < len(layout["samples"])
+    assert set(anchor_frames[0::3]) == {40}  # 20 mph in 0.5 mph steps
+    assert len(base64.b64decode(layout["alpha"])) == len(layout["sources"])
+    assert len(layout["sources"]) == grid["columns"] * grid["rows"]
+    assert set(layout["sources"]) == set(range(len(layout["samples"])))
+    assert layout["start"] == plan["heatmap_request"]["departure"]
+    window = layout["forecast"]
+    assert window["url"] == OPEN_METEO
+    start = datetime.fromisoformat(layout["start"]).timestamp()
+    assert window["start"] <= start
+    assert window["end"] >= start + frames * 3600
+
+    # The server fallback lays out the same grid and reads the same cells.
+    heatmap = client.post("/api/heatmap/", plan["heatmap_request"], format="json").json()
+    assert heatmap["grid"] == grid
+    assert heatmap["meta"]["forecast_cells"] == len(layout["samples"])
+
+
+def test_heatmap_is_the_same_at_every_interval(client: APIClient, upstream: Any) -> None:
     upstream(lambda lat, lon: {})
-    requests = [
-        client.post("/api/plans/", plan_body(interval_mi=mi), format="json").json()[
-            "heatmap_request"
-        ]
+    departure = soon()
+    plans = [
+        client.post(
+            "/api/plans/", plan_body(interval_mi=mi, departure=departure), format="json"
+        ).json()
         for mi in (10, 25, 50)
     ]
     # So switching the interval keeps the heatmap the browser already has.
+    requests = [plan["heatmap_request"] for plan in plans]
+    layouts = [plan["heatmap_layout"] for plan in plans]
     assert requests[0] == requests[1] == requests[2]
+    assert layouts[0] == layouts[1] == layouts[2]
     assert len(requests[0]["anchors"]) > 3
 
 

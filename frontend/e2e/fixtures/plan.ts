@@ -7,6 +7,7 @@ import type {
   TripRequest,
 } from '../../src/api/types'
 import type { RiskLevel } from '../../src/lib/risk'
+import { layoutFor } from './heatmap'
 import { THRESHOLDS } from './rules'
 
 type LonLat = [number, number]
@@ -183,6 +184,10 @@ export function planFor(trip: TripRequest): Plan {
       departure,
       load_lb: trip.load_lb,
     },
+    heatmap_layout: layoutFor(
+      [a, b, c].map((route) => route.geometry),
+      departure,
+    ),
     notes: [],
     meta: {
       forecast_cells: 412,

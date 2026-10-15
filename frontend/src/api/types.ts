@@ -96,12 +96,48 @@ export interface Thresholds {
   no_travel_inclusive: boolean
 }
 
+/** What the server fallback is asked for when the browser can't build the heatmap. */
 export interface HeatmapRequest {
   corridor: [number, number][][]
   /** Checkpoint cells the plan already fetched, so the heatmap can reuse them. */
   anchors: [number, number][]
   departure: string
   load_lb: number
+}
+
+/** Where and for which hours the browser fetches the heatmap's forecasts. */
+export interface ForecastSource {
+  /** Open-Meteo's forecast endpoint. */
+  url: string
+  /** First and last hour, UTC unix seconds. */
+  start: number
+  end: number
+}
+
+/**
+ * Everything the browser needs to build the heatmap itself: it fetches the
+ * samples after the anchored ones from `forecast` and packs them the way the
+ * server does.
+ */
+export interface HeatmapLayout {
+  grid: HeatmapPayload['grid']
+  /** Time of frame 0 (the departure); frame k is k hours later. */
+  start: string
+  frames: number
+  /** Physical value of one byte step per channel. */
+  steps: Record<Factor, number>
+  /** base64: the corridor weight of each grid cell, rows (south first) × columns. */
+  alpha: string
+  /** For each grid cell, the index of the sample whose weather it shows, or −1. */
+  sources: number[]
+  /** [lon, lat] of each forecast point. */
+  samples: [number, number][]
+  /**
+   * base64: frames × [wind, rain, snow] bytes for each of the first samples,
+   * which the plan read at its own checkpoints.
+   */
+  anchor_frames: string
+  forecast: ForecastSource
 }
 
 export interface ForecastMeta {
@@ -126,6 +162,7 @@ export interface Plan {
     warning: string | null
   }
   heatmap_request: HeatmapRequest
+  heatmap_layout: HeatmapLayout
   notes: string[]
   meta: ForecastMeta
 }

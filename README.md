@@ -74,9 +74,9 @@ database are needed. Every trip is a URL, so plans are shareable links.
 
 | Command | Where | What |
 | --- | --- | --- |
-| `uv run pytest` | `backend/` | 136 tests: risk boundaries, ranking, geometry, rate limits, API with faked services |
+| `uv run pytest` | `backend/` | 138 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 64 tests: thresholds, heatmap sampling, geometry, URL state, retries, UI |
+| `npm test` | `frontend/` | 99 tests: thresholds, heatmap packing and sampling, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
 | `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
@@ -90,7 +90,7 @@ flowchart LR
   D --> E[Risk per checkpoint<br/>thresholds + load rules]
   E --> F[Miles per risk level<br/>per route]
   F --> G[Ranking + plain-language reason]
-  B -. corridor .-> H[Heatmap grid, 49 hourly frames]
+  B -. corridor .-> H[Heatmap grid, 49 hourly frames,<br/>filled in by the browser]
 ```
 
 1. **Routes.** Trips up to 800 miles straight-line use Valhalla's **truck** costing with the
@@ -119,8 +119,9 @@ flowchart LR
    Lookups are snapped to a 0.05° lattice (≤ 3.5 km, finer than the forecast models),
    de-duplicated across routes, batched 150 per request and cached for 30 minutes. The
    window starts at the departure's 6-hour UTC block and covers at least the heatmap's 48
-   hours, so the heatmap, other intervals and nearby departures reuse the same forecasts
-   (see [Assumptions and limits](#assumptions-and-limits)).
+   hours, so the plan can fill in the heatmap's cells at its checkpoints, and other
+   intervals and nearby departures reuse the same forecasts (see
+   [Assumptions and limits](#assumptions-and-limits)).
 4. **Risk, exposure, recommendation.** See below.
 
 ## Risk rules and recommendation
@@ -179,19 +180,35 @@ The recommendation comes with:
 
 ## The heatmap
 
-**On the server**
-([`heatmap.py`](backend/planner/services/heatmap.py), [`corridor.py`](backend/planner/domain/corridor.py)):
+**Laid out by the plan, filled in by the browser**
+([`heatmap.py`](backend/planner/services/heatmap.py), [`corridor.py`](backend/planner/domain/corridor.py), [`openMeteo.ts`](frontend/src/api/openMeteo.ts), [`heatmap.ts`](frontend/src/lib/heatmap.ts)):
 
 - **Grid.** The heatmap samples a grid over the routes, limited to cells within 35 miles
-  of any route. Grid spacing adapts so a trip needs at most 220 forecast points.
+  of any route. Grid spacing adapts so a trip needs at most 220 forecast points, or up to
+  about 275 coast to coast, where the grid reaches its coarsest 0.6° step.
 - **Reusing the plan's forecasts.** A cell that contains one of the plan's checkpoints on
   a whole multiple of 50 miles is read at that checkpoint, whose forecast the plan has
   already fetched, instead of at its centre. Every interval (10, 25 or 50 mi) includes
-  those checkpoints, so the heatmap is the same whatever the interval. This saves 30–54%
-  of the heatmap's forecast calls on the sample trips. The cost is a value read up to half
-  a cell from where it is drawn. Over all 49 frames, checked against a 1.4–1.7× finer grid,
-  the heatmap catches 3–4 percentage points less of the risky area (Chicago → Denver: 65%
-  instead of 68%), about what one coarser grid step costs.
+  those checkpoints, so the heatmap is the same whatever the interval. The plan packs
+  these cells itself, which saves 30–54% of the heatmap's forecast calls on the sample
+  trips. The cost is a value read up to half a cell from where it is drawn. Over all 49
+  frames, checked against a 1.4–1.7× finer grid, the heatmap catches 3–4 percentage points
+  less of the risky area (Chicago → Denver: 65% instead of 68%), about what one coarser
+  grid step costs.
+- **The browser fetches the rest.** The plan response carries the grid, the point each
+  cell is read at, and the packed frames of the cells it already read. The browser asks
+  Open-Meteo for the other cells itself (84–150 on the sample trips, 150 per request, two
+  at a time), so they come out of the viewer's own free quota instead of the server's
+  shared one (see [Assumptions and limits](#assumptions-and-limits)). Forecasts it has
+  fetched are reused for 30 minutes, so a later departure in the same 6-hour block costs
+  nothing.
+- **Same bytes either way.** The browser's packer is a copy of the server's, down to
+  Python's rounding (halves go to even, where `Math.round` would round up). The backend's
+  tests write a fixture of Open-Meteo answers, with ties on purpose, and the texture the
+  server packs from them. Vitest checks that the browser packs exactly the same bytes.
+- **The server is the fallback.** If the browser can't get the forecasts (the viewer's
+  quota is used up, a network blocks Open-Meteo, or it fails), it asks the server
+  (`POST /api/heatmap/`), which fetches and packs the same layout as before.
 - **Frames.** Frame *k* is the weather at *departure + k hours*, read with the same
   function the checkpoints use, so the two agree at whole hours.
 - **Packing.** Wind, rain, snow and a corridor-edge weight are packed as RGBA bytes. Every
@@ -257,6 +274,8 @@ api/index.py                    Vercel entry point (WSGI)
 - **The backend stores nothing.** Trips live in the URL, upstream answers live in Django's
   cache, and the heatmap request carries its own corridor, so any instance can serve any
   request.
+- **The heatmap's forecasts come from the viewer.** The browser fetches them from
+  Open-Meteo itself, so the server's shared free quota pays for plans only.
 - **The map is driven imperatively.** React decides *what* is on the map; MapLibre layers
   and the GPU handle *how*, so 60 fps work never goes through React.
 
@@ -268,7 +287,7 @@ api/index.py                    Vercel entry point (WSGI)
 - **First paint needs no JavaScript.** `index.html` holds a static shell of the panel
   and a "Loading map…" pill, styled by the app's stylesheet, so the layout appears as soon
   as the HTML and CSS arrive.
-- **The panel doesn't wait for the map.** The app's own code is 36 kB gzipped. MapLibre
+- **The panel doesn't wait for the map.** The app's own code is 38 kB gzipped. MapLibre
   (284 kB) loads as a separate lazy chunk that `index.html` preloads at low priority
   ([`vite.config.ts`](frontend/vite.config.ts)), so the form works first and the map
   follows. React, UI primitives and MapLibre cache in separate chunks.
@@ -299,7 +318,7 @@ All responses are JSON; errors share one envelope:
 | `GET /api/rules/` | The thresholds, load rules and ranking order (the UI's legends read these) |
 | `GET /api/geocode/?q=denver` | Place suggestions (Photon, North America first) |
 | `POST /api/plans/` | Plan a trip (below) |
-| `POST /api/heatmap/` | Heatmap frames for a plan's `heatmap_request` |
+| `POST /api/heatmap/` | The whole heatmap for a plan's `heatmap_request`, fetched by the server: the fallback when the browser can't reach Open-Meteo |
 
 ```jsonc
 // POST /api/plans/
@@ -312,7 +331,9 @@ All responses are JSON; errors share one envelope:
 }
 // → trip, thresholds (for this load), routes[] with geometry, risk sections, exposure and
 //   checkpoints[] (mile, ETA, weather, level, drivers, load rule, reason), recommendation
-//   {route_id, ranking, reason, comparisons[], warning}, heatmap_request, notes, meta.timings_ms
+//   {route_id, ranking, reason, comparisons[], warning}, heatmap_layout {grid, samples,
+//   sources, alpha, anchor_frames, forecast: {url, start, end}}, heatmap_request, notes,
+//   meta.timings_ms
 ```
 
 | Status | When |
@@ -367,14 +388,22 @@ All responses are JSON; errors share one envelope:
 - **The API is tested end to end** against faked Valhalla and Open-Meteo: ranking, risk
   sections, the heatmap byte layout, validation and upstream-failure mapping.
 - **A browser smoke test runs the main flow.** Playwright drives the production build in
-  Chromium with every request stubbed, the basemap style included: it plans the Dallas to
-  Atlanta sample trip, checks the URL, the recommendation and the three routes, opens Route
-  C's checkpoints, steps the slider, plays the trip, checks that a route switch rewinds it,
-  starts a new trip, and fails on any console error
+  Chromium with every request stubbed, Open-Meteo and the basemap style included: it plans
+  the Dallas to Atlanta sample trip, checks the URL, the recommendation and the three
+  routes, checks that the browser built the heatmap from Open-Meteo without the server,
+  opens Route C's checkpoints, steps the slider, plays the trip, checks that a route switch
+  rewinds it, starts a new trip, and fails on any console error
   ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). Chromium runs with SwiftShader, so the map
   gets WebGL 2 without a GPU; where WebGL is still missing, the test checks the map's fallback
-  message instead. A second test refuses the first plan and heatmap requests the way a busy
-  Open-Meteo would, and checks that the app says so, counts down and retries on its own.
+  message instead. A second test refuses the viewer's Open-Meteo requests, and the first
+  plan and heatmap requests the way a busy Open-Meteo would, and checks that the heatmap
+  falls back to the server and that the app says so, counts down and retries on its own.
+- **The browser packs the heatmap exactly as the server does.** The backend's tests write
+  Open-Meteo answers, with rounding ties on purpose, and the texture the server packs from
+  them ([`test_heatmap_parity.py`](backend/planner/tests/test_heatmap_parity.py)). Vitest
+  checks the browser packs identical bytes
+  ([`heatmapParity.test.ts`](frontend/src/lib/heatmapParity.test.ts)), and the backend
+  checks its fixture is current.
 - **Rate limits have their own tests:** which refusals are retried and which are
   reported, batches kept after a refusal, and older forecasts standing in
   ([`test_upstream_limits.py`](backend/planner/tests/test_upstream_limits.py)).
@@ -447,7 +476,7 @@ Optional environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DJANGO_SECRET_KEY` | random per instance | Nothing is signed or stored, so an ephemeral key is safe |
-| `VALHALLA_URL`, `OSRM_URL`, `OPEN_METEO_URL`, `PHOTON_URL` | public servers | Point at self-hosted or commercial instances |
+| `VALHALLA_URL`, `OSRM_URL`, `OPEN_METEO_URL`, `PHOTON_URL` | public servers | Point at self-hosted or commercial instances. Browsers call `OPEN_METEO_URL` too, for the heatmap, so it must be public and send CORS headers (Open-Meteo's server does); otherwise heatmaps fall back to the server |
 | `UPSTREAM_USER_AGENT` | `Haulcast/0.1 (…)` | Identify your deployment to fair-use APIs |
 | `THROTTLE_PLAN`, `THROTTLE_HEATMAP`, `THROTTLE_GEOCODE` | 20/min, 20/min, 120/min | Per-client rate limits |
 
@@ -469,25 +498,27 @@ Optional environment variables:
   cached. For production, point the URLs at paid or self-hosted instances.
 - **Open-Meteo's free tier is the tightest limit.** It allows 600 calls a minute, 5,000 an
   hour and 10,000 a day per client IP, and each location in a request is one call. On
-  Vercel the function shares its outgoing IP with other tenants, so the real budget is
-  smaller, and unknown. Calls per sample trip, with the heatmap requested right after the
-  plan:
+  Vercel the function shares its outgoing IP with other tenants, so the server's real
+  budget is smaller, and unknown. So the server pays for plans only, and each viewer's
+  browser fetches its heatmap's forecasts from its own quota. Calls per sample trip:
 
-  | Trip | Plan | Heatmap | Total | Total before |
-  | --- | --- | --- | --- | --- |
-  | Dallas → Atlanta, every 25 mi | 100 | 110 | 210 | 260 |
-  | Chicago → Denver, every 25 mi | 136 | 150 | 286 | 350 |
-  | Los Angeles → Chicago, every 50 mi | 102 | 84 | 186 | 283 |
+  | Trip | Server (plan) | Viewer's browser (heatmap) | Server before (plan + heatmap) |
+  | --- | --- | --- | --- |
+  | Dallas → Atlanta, every 25 mi | 100 | 111 | 260 |
+  | Chicago → Denver, every 25 mi | 136 | 150 | 350 |
+  | Los Angeles → Chicago, every 50 mi | 102 | 84 | 283 |
 
-  - **Where the savings come from.** The heatmap reuses the plan's checkpoint forecasts.
-    A heatmap served by a different server instance than its plan pays full price: 160,
-    214 and 181 calls. A 10-mile interval still costs one call per checkpoint, about 500
-    for Los Angeles → Chicago.
-  - **Repeat views cost less.** Plans and heatmaps share one forecast window per 6-hour
-    departure block, since Open-Meteo charges per location, not per hour. A later
-    departure in the same block, or a coarser interval, costs no calls. A finer interval
-    pays only for its new checkpoints. A replayed seven-step review session (three samples,
-    two interval changes, a later departure) fell from 1,464 calls to 970.
+  - **Where the savings come from.** The browser fetches the heatmap's forecasts, and the
+    plan packs the cells read at its own checkpoints, so the browser needs only the rest.
+    A heatmap costs a viewer at most 220 calls (about 275 coast to coast), well inside
+    their 600 a minute, and no longer depends on which server instance answers. A 10-mile
+    interval still costs one call per checkpoint, about 500 for Los Angeles → Chicago.
+  - **Repeat views cost less.** Plans read one forecast window per 6-hour departure block,
+    since Open-Meteo charges per location, not per hour. A later departure in the same
+    block, or a coarser interval, costs no calls. A finer interval pays only for its new
+    checkpoints. The browser keeps its heatmap forecasts for 30 minutes the same way. A
+    replayed seven-step review session (three samples, two interval changes, a later
+    departure) fell from 1,464 server calls to 626, plus 345 from the viewer's browser.
   - **Refused batches don't waste the rest.** Forecasts are cached batch by batch, so a
     retry after a refusal pays only for the cells still missing.
 - **When Open-Meteo refuses anyway,** the app degrades step by step:
@@ -502,6 +533,13 @@ Optional environment variables:
   - **Older forecasts stand in.** Forecasts stay cached for 6 hours. If every cell a
     refused plan needs was fetched before, the plan uses those forecasts and says how old
     they are.
+  - **A refused browser hands the heatmap to the server.** When the viewer's own quota is
+    used up, or their network blocks Open-Meteo, the server fetches the heatmap as it
+    used to, with the same busy handling as plans.
+- **Viewers reach Open-Meteo directly.** The heatmap's grid points along the corridor go
+  from the viewer's browser, so Open-Meteo sees the viewer's IP address, as OpenFreeMap
+  already does for map tiles. No key or cookie is involved. No Content-Security-Policy is
+  set; one would need Open-Meteo's origin in `connect-src`.
 - **No cross-instance cache.** Sharing forecasts between function instances would need a
   store such as Vercel KV or Redis, and so an account and a key. Self-hosting Open-Meteo
   (`OPEN_METEO_URL`) removes the limits altogether.

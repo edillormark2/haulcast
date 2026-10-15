@@ -2,7 +2,7 @@ import { expect, type Page, type Route, test } from '@playwright/test'
 
 import type { HeatmapRequest, TripRequest } from '../src/api/types'
 import { BASEMAP_STYLE, BASEMAP_URL } from './fixtures/basemap'
-import { heatmapFor } from './fixtures/heatmap'
+import { heatmapFor, OPEN_METEO_URL, openMeteoFor } from './fixtures/heatmap'
 import { PLACES } from './fixtures/places'
 import { planFor } from './fixtures/plan'
 import { RULES } from './fixtures/rules'
@@ -68,6 +68,12 @@ test('plans a sample trip, compares routes, plays the trip and starts over', asy
   await expect(timeline.getByText('+1 h', { exact: true })).toBeVisible()
   await expect(timeline.getByText('Departure', { exact: true })).toBeHidden()
 
+  // The browser built the heatmap itself: the plan had packed 4 of its 16
+  // cells, the other 12 came from Open-Meteo, and the server built none.
+  await expect(timeline.getByText('Moderate', { exact: true })).toBeVisible()
+  expect(api.forecastLocations).toBe(12)
+  expect(api.heatmaps).toEqual([])
+
   // Play drives the selected route's trip from where the slider is.
   await timeline.getByRole('button', { name: 'Play the trip on Route C' }).click()
   await expect(timeline.getByRole('button', { name: 'Pause the trip on Route C' })).toBeVisible()
@@ -93,10 +99,15 @@ test('waits out a busy weather service and tries again on its own', async ({ pag
   const errors: string[] = []
   page.on('console', (message) => {
     // The browser logs each refused request; the app itself must log nothing.
-    const refused = message.text().includes('status of 503')
+    const refused = /status of (429|503)/.test(message.text())
     if (message.type() === 'error' && !refused) errors.push(message.text())
   })
-  const api = await stubNetwork(page, { busyOnce: ['POST /api/plans/', 'POST /api/heatmap/'] })
+  // The viewer's own Open-Meteo quota is used up, so the server builds the
+  // heatmap instead, once it has waited out its own refusal.
+  const api = await stubNetwork(page, {
+    busyOnce: ['POST /api/plans/', 'POST /api/heatmap/'],
+    openMeteoRefuses: true,
+  })
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Dallas to Atlanta' }).click()
@@ -113,7 +124,13 @@ test('waits out a busy weather service and tries again on its own', async ({ pag
   await expect(timeline).toContainText('Open-Meteo is busy, so the forecast map has to wait.')
   await expect(timeline.getByText('Moderate', { exact: true })).toBeVisible()
 
-  expect(api.refused).toEqual(['POST /api/plans/', 'POST /api/heatmap/'])
+  expect(api.refused).toEqual([
+    'POST /api/plans/',
+    'GET Open-Meteo',
+    'POST /api/heatmap/',
+    'GET Open-Meteo',
+  ])
+  expect(api.heatmaps).toHaveLength(1)
   expect(api.unstubbed).toEqual([])
   expect(errors).toEqual([])
 })
@@ -121,6 +138,10 @@ test('waits out a busy weather service and tries again on its own', async ({ pag
 interface FakeApi {
   /** Trips the app asked to plan. */
   plans: TripRequest[]
+  /** Heatmaps the server built: the fallback when the browser can't. */
+  heatmaps: HeatmapRequest[]
+  /** Locations the browser asked Open-Meteo for. */
+  forecastLocations: number
   /** Requests answered with a busy refusal. */
   refused: string[]
   /** Requests no stub answered. They are blocked, so a run never reaches a real service. */
@@ -141,11 +162,24 @@ const BUSY = {
   },
 }
 
+/** Open-Meteo's answer to a viewer who has used up their minute. */
+const MINUTE_USED_UP = {
+  status: 429,
+  headers: { 'Access-Control-Allow-Origin': '*' },
+  json: {
+    error: true,
+    reason: 'Minutely API request limit exceeded. Please try again in one minute.',
+  },
+}
+
 async function stubNetwork(
   page: Page,
-  { busyOnce = [] }: { busyOnce?: string[] } = {},
+  {
+    busyOnce = [],
+    openMeteoRefuses = false,
+  }: { busyOnce?: string[]; openMeteoRefuses?: boolean } = {},
 ): Promise<FakeApi> {
-  const api: FakeApi = { plans: [], refused: [], unstubbed: [] }
+  const api: FakeApi = { plans: [], heatmaps: [], forecastLocations: 0, refused: [], unstubbed: [] }
   const block = (route: Route) => {
     api.unstubbed.push(`${route.request().method()} ${route.request().url()}`)
     return route.abort('blockedbyclient')
@@ -157,6 +191,23 @@ async function stubNetwork(
 
   await page.route(BASEMAP_URL, (route) =>
     route.fulfill({ json: BASEMAP_STYLE, headers: { 'Access-Control-Allow-Origin': '*' } }),
+  )
+
+  // The heatmap's forecasts, which the browser fetches itself.
+  await page.route(
+    (url) => url.href.startsWith(OPEN_METEO_URL),
+    (route) => {
+      if (openMeteoRefuses) {
+        api.refused.push('GET Open-Meteo')
+        return route.fulfill(MINUTE_USED_UP)
+      }
+      const url = new URL(route.request().url())
+      api.forecastLocations += url.searchParams.get('latitude')?.split(',').length ?? 0
+      return route.fulfill({
+        json: openMeteoFor(url),
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      })
+    },
   )
 
   await page.route('**/api/**', (route) => {
@@ -176,8 +227,11 @@ async function stubNetwork(
         api.plans.push(trip)
         return route.fulfill({ json: planFor(trip) })
       }
-      case 'POST /api/heatmap/':
-        return route.fulfill({ json: heatmapFor(request.postDataJSON() as HeatmapRequest) })
+      case 'POST /api/heatmap/': {
+        const heatmapRequest = request.postDataJSON() as HeatmapRequest
+        api.heatmaps.push(heatmapRequest)
+        return route.fulfill({ json: heatmapFor(heatmapRequest) })
+      }
       default:
         return block(route)
     }
