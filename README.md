@@ -88,7 +88,9 @@ flowchart LR
 1. **Routes.** Trips up to 800 miles straight-line use Valhalla's **truck** costing with the
    truck's gross weight (load + 35,000 lb tare), so roads closed to heavy trucks are
    avoided. The public Valhalla server rejects anything over 1,500 km, so longer trips use
-   OSRM with a 65 mph truck speed cap applied to every road segment. The router's own
+   OSRM. Both plan the truck at no more than 65 mph: Valhalla is sent that top speed (its
+   truck default is 75 mph), and OSRM's car timings are slowed to it on every road
+   segment, so ETAs don't depend on which engine planned the trip. The router's own
    alternatives come first. If it returns fewer than three, Haulcast routes through a via
    point offset to either side of the fastest route's midpoint. A detour is kept only if
    it:
@@ -378,11 +380,13 @@ Optional environment variables:
 
 ## Assumptions and limits
 
-- **ETAs assume continuous driving** at the router's speeds; no Hours-of-Service breaks
-  are inserted, and Valhalla's ETAs don't include live traffic.
+- **ETAs assume continuous driving** at the router's speeds, capped at 65 mph; no
+  Hours-of-Service breaks are inserted, and Valhalla's ETAs don't include live traffic.
+- **Times** show in the viewer's time zone, and every clock time names it (for example
+  “arrives Thu 10:13 PM CDT”), since trips cross zones and dispatchers plan from elsewhere.
 - **Truck weight** sent to the router is load + 35,000 lb (a typical empty tractor and 53 ft
   trailer).
-- **Trips over 800 miles straight-line** use OSRM (car road network, 65 mph truck cap),
+- **Trips over 800 miles straight-line** use OSRM (car road network, same 65 mph cap),
   because the public Valhalla server stops at 1,500 km. Each route shows which engine
   planned it.
 - **Departure** must be within the next 7 days so the whole trip and the 48-hour heatmap

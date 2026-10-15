@@ -20,12 +20,14 @@ interface BottomSheetProps {
 
 /** How far a flick carries the sheet: velocity (px/ms) × this many ms. */
 const FLING_MS = 160
+/** A press that moves less than this is a tap, which the handle button handles. */
+const DRAG_THRESHOLD_PX = 4
 
 /**
  * A draggable bottom sheet over the map. It moves only with transform, follows
  * the finger 1:1 while dragging, and settles on the nearest snap point after
  * accounting for flick velocity. The handle is a button that steps through
- * the snap points for keyboard and screen-reader users.
+ * the snap points when tapped, clicked or pressed from the keyboard.
  */
 export function BottomSheet({
   snapPoints,
@@ -38,27 +40,45 @@ export function BottomSheet({
   const maxHeight = snapPoints.at(-1) ?? 0
   const height = snapPoints[snapIndex] ?? snapPoints[0] ?? 0
   const [dragOffset, setDragOffset] = useState<number | null>(null)
-  const drag = useRef<{ startY: number; lastY: number; lastTime: number; velocity: number } | null>(
-    null,
-  )
+  const drag = useRef<{
+    pointerId: number
+    startY: number
+    lastY: number
+    lastTime: number
+    velocity: number
+    dragging: boolean
+  } | null>(null)
 
   const visible = Math.min(Math.max(height - (dragOffset ?? 0), snapPoints[0] ?? 0), maxHeight)
 
   const onPointerDown = (event: ReactPointerEvent) => {
     if (event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = {
+      pointerId: event.pointerId,
       startY: event.clientY,
       lastY: event.clientY,
       lastTime: event.timeStamp,
       velocity: 0,
+      dragging: false,
     }
-    setDragOffset(0)
   }
 
   const onPointerMove = (event: ReactPointerEvent) => {
     const state = drag.current
-    if (!state) return
+    if (!state || event.pointerId !== state.pointerId) return
+    if (event.buttons === 0) {
+      // Released outside the sheet before the drag started; nothing to finish.
+      drag.current = null
+      return
+    }
+    if (!state.dragging) {
+      if (Math.abs(event.clientY - state.startY) < DRAG_THRESHOLD_PX) return
+      // Capture only once the press becomes a drag. Capturing on press makes
+      // Chromium send a mouse click to this wrapper instead of the handle
+      // button, so clicking the handle did nothing.
+      event.currentTarget.setPointerCapture(event.pointerId)
+      state.dragging = true
+    }
     const dt = Math.max(event.timeStamp - state.lastTime, 1)
     state.velocity = (event.clientY - state.lastY) / dt
     state.lastY = event.clientY
@@ -69,10 +89,8 @@ export function BottomSheet({
   const onPointerUp = () => {
     const state = drag.current
     drag.current = null
-    if (!state) return
-    const moved = Math.abs(state.lastY - state.startY)
+    if (!state?.dragging) return // a tap; the handle button's click handles it
     setDragOffset(null)
-    if (moved < 4) return // a tap; the handle button's click handles it
     const projected = height - (state.lastY - state.startY) - state.velocity * FLING_MS
     onSnapChange(nearestIndex(snapPoints, projected))
   }

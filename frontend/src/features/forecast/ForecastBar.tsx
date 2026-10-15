@@ -197,7 +197,7 @@ function TimeScrubber({ departureMs, route }: { departureMs: number; route: Rout
         </div>
       </div>
 
-      <p className="w-[6.75rem] shrink-0 text-right leading-tight tabular-nums" aria-live="off">
+      <p className="w-[8rem] shrink-0 text-right leading-tight tabular-nums" aria-live="off">
         <span className="block text-xs font-semibold text-fg">
           {Number.isInteger(hour) ? formatHour(clockMs) : formatClock(clockMs)}
         </span>

@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 from planner.domain.geometry import Coordinate, simplify_indices
 
 _HIGHWAY_REF = re.compile(r"^(I|US|[A-Z]{2})[- ]?(\d+[A-Z]?)\b")
+TRUCK_MAX_MPH = 65.0
+"""The fastest a loaded truck is planned to drive, on either router, so ETAs
+don't depend on which engine planned the trip."""
 SHAPE_TOLERANCE_MI = 0.003
 """About 5 m. Router shapes are far denser than that; thinning them speeds up
 everything downstream without moving the line."""

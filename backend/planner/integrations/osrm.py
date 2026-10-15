@@ -14,11 +14,10 @@ from typing import Any
 from planner import conf
 from planner.domain.geometry import Coordinate, decode_polyline
 from planner.integrations.http import HostThrottle, UpstreamError, request_json
-from planner.integrations.trips import Trip, make_trip, tally_highways
+from planner.integrations.trips import TRUCK_MAX_MPH, Trip, make_trip, tally_highways
 from planner.integrations.valhalla import NoRouteError
 
 SERVICE = "OSRM"
-TRUCK_MAX_MPH = 65.0
 METERS_PER_MILE = 1609.344
 TIMING_STEP_MI = 1.0
 """Keep one timing breakpoint per mile or so; per-segment data is overkill."""
