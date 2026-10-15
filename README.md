@@ -46,8 +46,9 @@ shape, and each checkpoint says when the truck gets there and what it will meet 
 6. [API](#api)
 7. [Design](#design)
 8. [Quality](#quality)
-9. [Deployment](#deployment)
-10. [Assumptions and limits](#assumptions-and-limits)
+9. [Live data check](#live-data-check)
+10. [Deployment](#deployment)
+11. [Assumptions and limits](#assumptions-and-limits)
 
 More detail: [design record](docs/DESIGN.md) (requirement-by-requirement) and the
 [walkthrough script](docs/WALKTHROUGH.md).
@@ -356,13 +357,62 @@ All responses are JSON; errors share one envelope:
 - **A browser smoke test runs the main flow.** Playwright drives the production build in
   Chromium with every request stubbed, the basemap style included: it plans the Dallas to
   Atlanta sample trip, checks the URL, the recommendation and the three routes, opens Route
-  C's checkpoints, steps and plays the forecast, and fails on any console error
+  C's checkpoints, steps the slider, plays the trip, checks that a route switch rewinds it,
+  starts a new trip, and fails on any console error
   ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). Chromium runs with SwiftShader, so the map
   gets WebGL 2 without a GPU; where WebGL is still missing, the test checks the map's fallback
   message instead.
 - **Static checks run strict.** Ruff and mypy (strict) on the backend; ESLint
   (`strictTypeChecked`), TypeScript strict and Prettier on the frontend. CI runs all of it
   ([`ci.yml`](.github/workflows/ci.yml)).
+
+## Live data check
+
+The tests above use made-up weather, so on 15 October 2026 the live site was also checked end
+to end (commit `2ba8fbb`). That covered 11 scenarios and 15 full trip plans, including a real
+storm over Oklahoma, Santa Ana winds near San Diego and snow on I-80 in Wyoming. Every number
+was worked out again from the brief's rules and straight from Open-Meteo, then compared with
+the API and with what the screen shows.
+
+**Result: the logic is correct.** Every weather reading, risk level, mileage total and
+recommendation matched.
+
+| What was checked | How | Result |
+| --- | --- | --- |
+| Weather at the truck's arrival time | Wind, gusts, rain and snow at each checkpoint, read again from Open-Meteo for the same place and hour | ✅ 1,307 of 1,307 identical |
+| Risk levels | Every checkpoint scored again with the brief's tables and load rules | ✅ 1,433 checkpoints, 0 mismatches |
+| Rule edges | 36 exact boundary values, such as 25 mph, 0.25 in/hr, and 35 mph at 40,000 vs 40,001 lb | ✅ all match the brief |
+| Recommendation | Miles at each risk level and the ranking, worked out again for every trip | ✅ same pick every time; each reason quotes the right numbers |
+| Checkpoints | Spacing (0, N, 2N… and the destination) and position on the route | ✅ within 31 m of the route; same routes at 10, 25 and 50 mi |
+| Heatmap | Sampled values against Open-Meteo | ✅ 18,228 of 18,228 identical |
+| Screen against API | Every number on screen, on desktop and phone | ✅ 1,041 of 1,041 match |
+| Bad input | Past or far-off departure, 80,001 lb, same start and end, nonsense places and more | ✅ 15 cases, all refused with a clear message |
+
+**Scenarios**
+
+| Trip | Load | Weather on the way | Recommended | Result |
+| --- | --- | --- | --- | --- |
+| Dallas → Atlanta | 42,000 lb | Calm | A via I-20, 1 h 13 min faster | ✅ |
+| Chicago → Denver (OSRM) | 36,000 lb | 25 mph wind on one stretch | B via I-70 & I-55, lowest average risk | ✅ |
+| Los Angeles → Chicago (OSRM, 35–41 h) | 28,000 lb | Moderate wind on Route B | A via I-70 & I-76 | ✅ |
+| Dallas → Fort Worth (32 mi) | 20,000 lb | Calm | A via I-30; only two routes exist, and the app says so | ✅ |
+| San Diego → El Centro | 25k, 35k and 45k lb | Santa Ana winds, gusts to 63 mph | B via CA-94 at every load. The load rules turn the same 45.7 mph wind from Severe into No Travel | ✅ |
+| Dallas → Tulsa | 40,000 lb | Storm, rain up to 3.98 in/hr | B, the only route with no No Travel miles | ✅ |
+| Denver → Salt Lake City | 40,000 lb | Snow on I-80, up to 1.68 in/hr | B via I-70 & US-6; the I-80 route ranks last | ✅ |
+| Dallas → Atlanta, 2 and 6 days ahead | 42,000 lb | Calm | A via I-20 | ✅ |
+| Same trip every 10, 25 and 50 mi | 42,000 lb | — | Same routes; shared checkpoints identical | ✅ |
+
+**Issues it found** (status on 15 October 2026)
+
+| Issue | Status |
+| --- | --- |
+| On phones, the sheet handle ignored mouse and trackpad clicks | ✅ Fixed and live |
+| Truck ETAs on Valhalla routes allowed car speeds (up to 68 mph on average) | ✅ Fixed: one 65 mph cap for both routers |
+| Clock times showed no time zone | ✅ Fixed and live |
+| A busy weather service was reported as a general upstream error | 🔄 Fix in review |
+| Heatmap cells (7–41 mi) are too coarse for small storm cells | ⚪ Open. The recommendation is unaffected: checkpoints use a 3.5 mi grid |
+| Rain of 1.001–1.004 in/hr or snow of 3.001–3.004 in/hr shows as Severe, not No Travel | ⚪ Open, low. A side effect of rounding to the precision shown |
+| Gusts are read between hours instead of as each hour's peak | ⚪ Open, low. Gusts are only shown; they don't affect risk |
 
 ## Deployment
 
