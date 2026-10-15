@@ -2,8 +2,9 @@
 grid around the routes, packed as one RGBA texture for WebGL.
 
 Frame k shows the weather at departure + k hours, read with the same function
-that reads checkpoint weather, so the heatmap and the checkpoints always agree
-at whole slider hours. Risk is not baked in: the client classifies the
+that reads checkpoint weather and packed so each reading keeps its risk band:
+at whole slider hours a cell's value falls in the band a checkpoint reading
+the same forecast gets. Risk is not baked in: the client classifies the
 interpolated values with the thresholds sent alongside, which avoids the false
 bands that interpolating risk levels would draw.
 
@@ -20,6 +21,7 @@ Open-Meteo: the server fetches and packs the whole heatmap from the same layout.
 from __future__ import annotations
 
 import base64
+import math
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -29,7 +31,7 @@ from functools import lru_cache
 from planner.domain.corridor import Corridor, build_corridor
 from planner.domain.forecast import HOUR_S, HourlySeries
 from planner.domain.geometry import Coordinate, Polyline, simplify
-from planner.domain.risk import BandScale, Factor, scales_for_load
+from planner.domain.risk import SCALES, BandScale, Factor, scales_for_load
 from planner.services.forecasts import (
     HORIZON_HOURS,
     ForecastLookup,
@@ -236,9 +238,9 @@ def pack_frames(series: Iterable[HourlySeries], departure_ts: int) -> bytes:
             conditions = one.conditions_at(departure_ts + frame * HOUR_S)
             data += bytes(
                 (
-                    _quantize(conditions.wind_mph, STEP[Factor.WIND]),
-                    _quantize(conditions.rain_in_hr, STEP[Factor.RAIN]),
-                    _quantize(conditions.snow_in_hr, STEP[Factor.SNOW]),
+                    _quantize(conditions.wind_mph, Factor.WIND),
+                    _quantize(conditions.rain_in_hr, Factor.RAIN),
+                    _quantize(conditions.snow_in_hr, Factor.SNOW),
                 )
             )
     return bytes(data)
@@ -260,5 +262,19 @@ def texture(layout: HeatmapLayout, frames: bytes) -> bytes:
     return bytes(data)
 
 
-def _quantize(value: float, step: float) -> int:
-    return min(255, max(0, round(value / step)))
+def _quantize(value: float, factor: Factor) -> int:
+    """A reading in byte steps, rounded so it keeps the band a checkpoint gives it.
+
+    Every band starts on a whole byte, so rounding down keeps a reading in its
+    band: 34.8 mph packs as 34.5, Moderate, where rounding to the nearest step
+    showed 35.0, High. Past an exclusive No Travel limit it rounds up instead:
+    3.01 in/hr of snow is No Travel, but 3.00 is Severe. The 1e-9 absorbs float
+    error, as 0.06 / 0.02 is 2.9999999999999996.
+    """
+    steps = value / STEP[factor]
+    scale = SCALES[factor]
+    if not scale.no_travel_inclusive and value > scale.no_travel:
+        byte = math.ceil(steps - 1e-9)
+    else:
+        byte = math.floor(steps + 1e-9)
+    return min(255, max(0, byte))

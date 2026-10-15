@@ -1,5 +1,5 @@
 import type { Factor, HeatmapLayout, HeatmapPayload, Thresholds } from '../api/types'
-import { conditionsAt, type HourlySeries, roundHalfEven } from './forecast'
+import { conditionsAt, type HourlySeries } from './forecast'
 import { HOUR_MS } from './time'
 
 const HOUR_S = HOUR_MS / 1000
@@ -54,7 +54,13 @@ export function heatmapFromForecasts(
 ): HeatmapData {
   const { grid, frames } = layout
   const anchored = base64ToBytes(layout.anchor_frames)
-  const packed = packFrames(series, Date.parse(layout.start) / 1000, frames, layout.steps)
+  const packed = packFrames(
+    series,
+    Date.parse(layout.start) / 1000,
+    frames,
+    layout.steps,
+    thresholds,
+  )
   const sampleFrames = new Uint8Array(anchored.length + packed.length)
   sampleFrames.set(anchored)
   sampleFrames.set(packed, anchored.length)
@@ -96,13 +102,18 @@ export function packFrames(
   startS: number,
   frames: number,
   steps: Record<Factor, number>,
+  thresholds: Record<Factor, Thresholds>,
 ): Uint8Array {
   const bytes = new Uint8Array(series.length * frames * SAMPLE_BYTES)
   series.forEach((one, i) => {
     for (let frame = 0; frame < frames; frame++) {
       const { wind, rain, snow } = conditionsAt(one, startS + frame * HOUR_S)
       bytes.set(
-        [quantize(wind, steps.wind), quantize(rain, steps.rain), quantize(snow, steps.snow)],
+        [
+          quantize(wind, steps.wind, thresholds.wind),
+          quantize(rain, steps.rain, thresholds.rain),
+          quantize(snow, steps.snow, thresholds.snow),
+        ],
         (i * frames + frame) * SAMPLE_BYTES,
       )
     }
@@ -110,8 +121,21 @@ export function packFrames(
   return bytes
 }
 
-function quantize(value: number, step: number): number {
-  return Math.min(255, Math.max(0, roundHalfEven(value / step)))
+/**
+ * A reading in byte steps, rounded so it keeps the band a checkpoint gives it:
+ * down, as every band starts on a whole byte, but up past an exclusive No
+ * Travel limit (3.01 in/hr of snow is No Travel, 3.00 Severe). A copy of the
+ * server's `_quantize`; 1e-9 absorbs float error (0.06 / 0.02 is
+ * 2.9999999999999996). Rain and snow have the same limits at every load, and
+ * wind's is inclusive at every load, so the bytes don't depend on the load.
+ */
+function quantize(value: number, step: number, thresholds: Thresholds): number {
+  const steps = value / step
+  const byte =
+    !thresholds.no_travel_inclusive && value > thresholds.bounds[3]
+      ? Math.ceil(steps - 1e-9)
+      : Math.floor(steps + 1e-9)
+  return Math.min(255, Math.max(0, byte))
 }
 
 /** Fractional frame for a moment, clamped to the data. */

@@ -38,7 +38,7 @@ describe.each(fixture.cases)('the heatmap for a departure at $departure', (parit
 
   it('packs the same bytes as the server, from the same forecasts', () => {
     const startS = Date.parse(layout.start) / 1000
-    const browser = packFrames(series, startS, layout.frames, layout.steps)
+    const browser = packFrames(series, startS, layout.frames, layout.steps, thresholds)
     // The plan's frames for its anchors came from the server's packer.
     expect(anchored).toBeGreaterThan(0)
     expect(browser.subarray(0, bytes(layout.anchor_frames).length)).toEqual(

@@ -55,9 +55,9 @@ export function conditionsAt(series: HourlySeries, timestampS: number): Conditio
 
 /**
  * Python's `round(x, digits)`: x's exact binary value rounded to `digits`
- * decimals, halves to even. The server's heatmap bytes come from Python, and
- * `Math.round` and `toFixed` both round halves up: 0.01 in/hr of snow in 0.02
- * steps is 0.5 steps, which Python rounds to 0 and `Math.round` to 1.
+ * decimals, halves to even. The server rounds readings with it before packing
+ * the heatmap, and `Math.round` and `toFixed` both round halves up: 0.125 in/hr
+ * of rain is 0.12 in Python and 0.13 with `toFixed`, a byte apart.
  */
 export function roundHalfEven(x: number, digits = 0): number {
   const scale = 10 ** digits
