@@ -1,7 +1,10 @@
 import type { Thresholds } from '../api/types'
+import { RISK_LEVELS } from './risk'
 import { levelFor, overallLevel, shaderBounds } from './thresholds'
 
-// Wind for a load over 40,000 lb: the load rules collapse the High band.
+const wind: Thresholds = { unit: 'mph', bounds: [25, 35, 45, 55], no_travel_inclusive: true }
+// Over 30,000 lb, 45 mph is No Travel; over 40,000 lb, 35 mph is Severe too.
+const mediumWind: Thresholds = { unit: 'mph', bounds: [25, 35, 45, 45], no_travel_inclusive: true }
 const heavyWind: Thresholds = { unit: 'mph', bounds: [25, 35, 35, 45], no_travel_inclusive: true }
 const rain: Thresholds = { unit: 'in/hr', bounds: [0.1, 0.25, 0.5, 1], no_travel_inclusive: false }
 const snow: Thresholds = { unit: 'in/hr', bounds: [0.5, 1, 2, 3], no_travel_inclusive: false }
@@ -34,8 +37,78 @@ describe('overallLevel', () => {
 })
 
 describe('shaderBounds', () => {
-  it('lifts an exclusive bound by half a quantisation step', () => {
-    expect(shaderBounds(rain, 0.01)).toEqual([0.1, 0.25, 0.5, 1.005])
-    expect(shaderBounds(heavyWind, 0.5)).toEqual([25, 35, 35, 45])
+  // Each factor's bands and the physical value of one heatmap byte.
+  const FACTORS = [
+    ['wind up to 30,000 lb', wind, 0.5],
+    ['wind over 30,000 lb', mediumWind, 0.5],
+    ['wind over 40,000 lb', heavyWind, 0.5],
+    ['rain', rain, 0.01],
+    ['snow', snow, 0.02],
+  ] as const
+  /** The narrowest blend, where the value doesn't change across a pixel. */
+  const FLAT = 2e-5
+
+  it('moves inclusive bounds down and an exclusive one up by 1% of a step', () => {
+    const rounded = (bounds: number[]) => bounds.map((bound) => Number(bound.toFixed(9)))
+    expect(rounded(shaderBounds(heavyWind, 0.5))).toEqual([24.995, 34.995, 34.995, 44.995])
+    expect(rounded(shaderBounds(rain, 0.01))).toEqual([0.0999, 0.2499, 0.4999, 1.0001])
+  })
+
+  it.each(FACTORS)('draws every %s byte in its band', (_, thresholds, step) => {
+    for (let byte = 0; byte <= 255; byte++) {
+      const level = gpuLevel(gpuValue(byte, step), thresholds, step, FLAT)
+      expect(RISK_LEVELS[level], `byte ${String(byte)}`).toBe(levelFor(byte * step, thresholds))
+    }
+  })
+
+  it.each(FACTORS)('keeps a %s threshold byte in its band at any slope', (_, thresholds, step) => {
+    // A steeper field blends each band edge over more of the value range, but
+    // only on the side the bound doesn't belong to, so the byte on it stays put.
+    for (const bound of thresholds.bounds) {
+      const byte = Math.round(bound / step)
+      for (const width of [FLAT, step / 2, step, 4 * step]) {
+        const level = gpuLevel(gpuValue(byte, step), thresholds, step, width)
+        expect(Math.floor(level), `byte ${String(byte)}, blend ${String(width)}`).toBe(
+          RISK_LEVELS.indexOf(levelFor(byte * step, thresholds)),
+        )
+      }
+    }
+  })
+
+  it.each(FACTORS)('puts %s band edges where the hover readout does', (_, thresholds, step) => {
+    // Values between bytes, as the shader interpolates them, every 1/200 of a
+    // step. Only those within the allowance (2/200 of a step) of a bound may disagree.
+    const bounds = thresholds.bounds.map((bound) => Math.round((bound / step) * 200))
+    const disagree: number[] = []
+    for (let i = 0; i <= 255 * 200; i++) {
+      if (bounds.some((bound) => Math.abs(i - bound) <= 2)) continue
+      const value = (i / 200) * step
+      const level = gpuLevel(Math.fround(value), thresholds, step, FLAT)
+      if (RISK_LEVELS[level] !== levelFor(value, thresholds)) disagree.push(value)
+    }
+    expect(disagree).toEqual([])
   })
 })
+
+/** A byte as the shader reads it: a float32 texel (byte / 255), × 255, × the step. */
+function gpuValue(byte: number, step: number): number {
+  const f = Math.fround
+  return f(f(f(byte / 255) * 255) * f(step))
+}
+
+/**
+ * The shader's `bandLevel` with a blend `width` wide: each crossing blends in
+ * below an inclusive bound and above an exclusive one.
+ */
+function gpuLevel(value: number, thresholds: Thresholds, step: number, width: number): number {
+  return shaderBounds(thresholds, step).reduce((level, bound, i) => {
+    const below = i < 3 || thresholds.no_travel_inclusive
+    const start = Math.fround(bound) - (below ? width : 0)
+    return level + smoothstep(start, start + width, value)
+  }, 0)
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1)
+  return t * t * (3 - 2 * t)
+}

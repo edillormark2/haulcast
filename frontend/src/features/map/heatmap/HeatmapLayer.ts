@@ -43,6 +43,7 @@ const UNIFORMS = [
   'u_wind_bounds',
   'u_rain_bounds',
   'u_snow_bounds',
+  'u_no_travel_inclusive',
   'u_metric',
   'u_colors',
   'u_opacity',
@@ -144,7 +145,7 @@ export class HeatmapLayer implements CustomLayerInterface {
     if (!this.visible || !gpu?.texture || !data || !map) return
     if (options.shaderData.variantName !== 'mercator') return
 
-    const { grid } = data
+    const { grid, steps, thresholds } = data
     const [west, north] = mercator(grid.west, grid.north)
     const [east, south] = mercator(grid.east, grid.south)
     const fade = Math.min((performance.now() - this.fadeStartedAt) / FADE_IN_MS, 1)
@@ -161,10 +162,16 @@ export class HeatmapLayer implements CustomLayerInterface {
     gl.uniform2f(u.u_size, grid.columns, grid.rows)
     gl.uniform1f(u.u_frame, Math.min(Math.max(this.frame, 0), data.frames - 1))
     gl.uniform1f(u.u_frames, data.frames)
-    gl.uniform3f(u.u_steps, data.steps.wind, data.steps.rain, data.steps.snow)
-    gl.uniform4fv(u.u_wind_bounds, shaderBounds(data.thresholds.wind, data.steps.wind))
-    gl.uniform4fv(u.u_rain_bounds, shaderBounds(data.thresholds.rain, data.steps.rain))
-    gl.uniform4fv(u.u_snow_bounds, shaderBounds(data.thresholds.snow, data.steps.snow))
+    gl.uniform3f(u.u_steps, steps.wind, steps.rain, steps.snow)
+    gl.uniform4fv(u.u_wind_bounds, shaderBounds(thresholds.wind, steps.wind))
+    gl.uniform4fv(u.u_rain_bounds, shaderBounds(thresholds.rain, steps.rain))
+    gl.uniform4fv(u.u_snow_bounds, shaderBounds(thresholds.snow, steps.snow))
+    gl.uniform3f(
+      u.u_no_travel_inclusive,
+      Number(thresholds.wind.no_travel_inclusive),
+      Number(thresholds.rain.no_travel_inclusive),
+      Number(thresholds.snow.no_travel_inclusive),
+    )
     gl.uniform1i(u.u_metric, METRIC_INDEX[this.metric])
     gl.uniform4fv(u.u_colors, COLORS)
     gl.uniform1f(u.u_opacity, (1 - (1 - fade) ** 3) * zoomOpacity)

@@ -31,6 +31,7 @@ uniform vec3 u_steps;         // physical value of one byte: wind, rain, snow
 uniform vec4 u_wind_bounds;   // Moderate, High, Severe, No Travel lower bounds
 uniform vec4 u_rain_bounds;
 uniform vec4 u_snow_bounds;
+uniform vec3 u_no_travel_inclusive; // wind, rain, snow: 1 if No Travel includes its bound
 uniform int u_metric;         // 0 risk, 1 wind, 2 rain, 3 snow
 uniform vec4 u_colors[5];     // straight RGBA per level
 uniform float u_opacity;
@@ -75,10 +76,14 @@ vec4 sampleWeather(vec2 cell, float w) {
   return clamp(sum, lo, hi);
 }
 
-// Number of bounds the value has crossed (0–4), antialiased over about a pixel.
-float bandLevel(float value, vec4 bounds) {
-  vec4 edge = vec4(fwidth(value) * 0.75 + 1e-5);
-  vec4 crossed = smoothstep(bounds - edge, bounds + edge, vec4(value));
+// Number of bounds the value has crossed (0–4), antialiased over about a pixel
+// on the side of each bound that the bound doesn't belong to: below an
+// inclusive bound, above an exclusive one. A value on a bound, like a cell
+// whose byte sits on a threshold, is drawn wholly in its own band.
+float bandLevel(float value, vec4 bounds, float noTravelInclusive) {
+  float width = fwidth(value) * 1.5 + 2e-5;
+  vec4 start = bounds - width * vec4(1.0, 1.0, 1.0, noTravelInclusive);
+  vec4 crossed = smoothstep(start, start + width, vec4(value));
   return crossed.x + crossed.y + crossed.z + crossed.w;
 }
 
@@ -92,9 +97,9 @@ void main() {
 
   vec3 value = texel.rgb * 255.0 * u_steps;
   vec3 levels = vec3(
-    bandLevel(value.x, u_wind_bounds),
-    bandLevel(value.y, u_rain_bounds),
-    bandLevel(value.z, u_snow_bounds)
+    bandLevel(value.x, u_wind_bounds, u_no_travel_inclusive.x),
+    bandLevel(value.y, u_rain_bounds, u_no_travel_inclusive.y),
+    bandLevel(value.z, u_snow_bounds, u_no_travel_inclusive.z)
   );
   vec3 nearModerate = value / vec3(u_wind_bounds.x, u_rain_bounds.x, u_snow_bounds.x);
 

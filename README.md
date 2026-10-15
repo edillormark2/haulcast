@@ -76,7 +76,7 @@ database are needed. Every trip is a URL, so plans are shareable links.
 | --- | --- | --- |
 | `uv run pytest` | `backend/` | 164 tests: risk boundaries, ranking, geometry, rate limits, heatmap bytes, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 101 tests: thresholds, heatmap packing and sampling, geometry, URL state, retries, UI |
+| `npm test` | `frontend/` | 114 tests: thresholds, heatmap packing, sampling and band edges, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
 | `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
@@ -233,6 +233,12 @@ The recommendation comes with:
 - **Classification.** Risk is computed per pixel from the interpolated wind, rain and snow
   against this load's thresholds. Interpolating risk *levels* instead would draw false
   Moderate/High rings between a calm cell and a stormy one.
+- **Values on a threshold.** Packing rounds down, so readings of 35.0–35.4 mph all land
+  exactly on 35.0. Each band edge is antialiased on the side its threshold doesn't belong
+  to (below 35 mph, above 1.00 in/hr of rain), so such a cell is drawn wholly in its
+  band, No Travel hatching included, rather than half in the band below, and band edges
+  fall where the hover readout puts them. The shader's thresholds move 1% of a byte step
+  that way to absorb float32 error (0.10 in/hr of rain comes out a hair under 0.10).
 - **No colour-only cues.** No Travel gets road-closed hatching, and the same colours mean
   the same bands in the Risk, Wind, Rain and Snow views.
 - **Hover readouts** use a CPU copy of the same maths ([`heatmap.ts`](frontend/src/lib/heatmap.ts)).
@@ -392,7 +398,9 @@ All responses are JSON; errors share one envelope:
     shows the folded thresholds behind the heatmap and legends match `assess()` exactly.
   - **Heatmap bytes.** Every 0.1 mph from 0 to 90 at seven loads, and every 0.01 in/hr of
     rain and snow, packs into a heatmap byte with the level `assess()` gives the reading
-    ([`test_heatmap.py`](backend/planner/tests/test_heatmap.py)).
+    ([`test_heatmap.py`](backend/planner/tests/test_heatmap.py)), and the shader draws
+    every byte, read in float32 as the GPU reads it, in that level
+    ([`thresholds.test.ts`](frontend/src/lib/thresholds.test.ts)).
   - **Ranking.** Each criterion decides on its own, the No Travel gate applies first, and
     floating-point noise never decides.
 - **The API is tested end to end** against faked Valhalla and Open-Meteo: ranking, risk
