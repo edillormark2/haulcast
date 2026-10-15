@@ -12,6 +12,10 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly fields: Record<string, unknown> | undefined
+  /** The upstream service that failed, when one did. */
+  readonly service: string | undefined
+  /** Seconds the server asked to wait before trying again, when it knows. */
+  readonly retryAfter: number | undefined
 
   constructor(status: number, body: ApiErrorBody['error']) {
     super(body.message)
@@ -19,6 +23,14 @@ export class ApiError extends Error {
     this.status = status
     this.code = body.code
     this.fields = body.fields
+    this.service = body.service
+    this.retryAfter = body.retry_after ?? undefined
+  }
+
+  /** A free service, or this server's own rate limit, turned the request
+   * away for now: it is worth repeating once the wait has passed. */
+  get busy(): boolean {
+    return this.code === 'upstream_busy' || this.code === 'rate_limited'
   }
 }
 

@@ -82,7 +82,7 @@ describe('decodeHeatmap and frameAt', () => {
       steps: { wind: 0.5, rain: 0.01, snow: 0.02 },
       thresholds,
       data: btoa(String.fromCharCode(1, 2, 3, 4)),
-      meta: { forecast_cells: 1, timings_ms: {} },
+      meta: { forecast_cells: 1, fetched_cells: 1, stale_since: null, timings_ms: {} },
     })
     expect(Array.from(data.texels)).toEqual([1, 2, 3, 4])
     expect(frameAt(data, Date.parse('2026-10-16T13:30:00Z'))).toBe(1.5)

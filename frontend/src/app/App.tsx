@@ -1,7 +1,7 @@
 import { CircleNotchIcon } from '@phosphor-icons/react'
 import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react'
 
-import { useHeatmap, usePlan } from '../api/queries'
+import { busyRetry, useHeatmap, usePlan } from '../api/queries'
 import type { Plan, TripRequest } from '../api/types'
 import { ForecastBar } from '../features/forecast/ForecastBar'
 import { useForecastClock } from '../features/forecast/useForecastClock'
@@ -46,11 +46,13 @@ export function App() {
 
   const planning = planQuery.isFetching
   const refreshing = planning && planQuery.isPlaceholderData
+  const planRetry = busyRetry(planQuery)
   const query: PlanQueryState = {
     plan,
     loading: planning,
     refreshing,
     error: planQuery.error,
+    busy: planRetry,
     retry: () => void planQuery.refetch(),
   }
   const submit = useCallback((next: TripRequest) => setTrip(next), [setTrip])
@@ -69,17 +71,21 @@ export function App() {
   const overlayInsets: Insets = desktop
     ? insets
     : { ...insets, bottom: snapPoints[sheetSnap] ?? insets.bottom }
-  const mapStatus = refreshing
-    ? 'Updating the routes…'
-    : planning
-      ? 'Finding three truck routes…'
-      : null
+  const mapStatus = planRetry
+    ? `${planRetry.service} is busy, trying again soon…`
+    : refreshing
+      ? 'Updating the routes…'
+      : planning
+        ? 'Finding three truck routes…'
+        : null
 
   const forecastBar = plan && (
     <ForecastBar
       plan={plan}
       departureMs={departureMs}
       heatmapStatus={heatmapQuery.status}
+      heatmapError={heatmapQuery.error}
+      heatmapRetry={busyRetry(heatmapQuery)}
       onRetry={() => void heatmapQuery.refetch()}
       compact={!desktop}
     />
@@ -127,7 +133,7 @@ export function App() {
             snapPoints={snapPoints}
             snapIndex={sheetSnap}
             onSnapChange={setSheetSnap}
-            header={<SheetHeader plan={plan} planning={planning && !plan} />}
+            header={<SheetHeader plan={plan} status={mapStatus} />}
           >
             {panel}
           </BottomSheet>
@@ -148,8 +154,11 @@ function MapUnavailable() {
   )
 }
 
-/** Always visible on phones: the decision, even with the sheet collapsed. */
-function SheetHeader({ plan, planning }: { plan: Plan | undefined; planning: boolean }) {
+/**
+ * Always visible on phones: the decision, even with the sheet collapsed, or
+ * what planning is waiting for until there is one.
+ */
+function SheetHeader({ plan, status }: { plan: Plan | undefined; status: string | null }) {
   const route = plan?.routes.find((r) => r.id === plan.recommendation.route_id)
   return (
     <div className="border-b border-line px-4 pb-3">
@@ -171,10 +180,10 @@ function SheetHeader({ plan, planning }: { plan: Plan | undefined; planning: boo
             </p>
           </div>
         </div>
-      ) : planning ? (
+      ) : status ? (
         <div className="flex items-center gap-2.5" role="status">
           <CircleNotchIcon size={22} className="animate-spin text-teal" aria-hidden />
-          <p className="text-sm font-semibold text-fg">Finding three truck routes…</p>
+          <p className="text-sm font-semibold text-fg">{status}</p>
         </div>
       ) : (
         <div className="flex items-center gap-2.5">

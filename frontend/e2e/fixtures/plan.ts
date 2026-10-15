@@ -179,11 +179,17 @@ export function planFor(trip: TripRequest): Plan {
     },
     heatmap_request: {
       corridor: [a, b, c].map((route) => route.geometry),
+      anchors: [],
       departure,
       load_lb: trip.load_lb,
     },
     notes: [],
-    meta: { forecast_cells: 412, timings_ms: { routing: 1830, forecast: 2410, total: 4390 } },
+    meta: {
+      forecast_cells: 412,
+      fetched_cells: 412,
+      stale_since: null,
+      timings_ms: { routing: 1830, forecast: 2410, total: 4390 },
+    },
   }
 }
 

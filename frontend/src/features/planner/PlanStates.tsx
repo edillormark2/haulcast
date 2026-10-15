@@ -7,8 +7,10 @@ import {
 import { useEffect, useState } from 'react'
 
 import { ApiError } from '../../api/client'
+import type { BusyRetry } from '../../api/queries'
 import type { TripRequest } from '../../api/types'
 import { Button } from '../../ui/Button'
+import { RetryNotice } from '../../ui/RetryNotice'
 import { SAMPLE_TRIPS, withNextDeparture } from './sampleTrips'
 
 /** Before the first plan: what the tool does, and trips to try. */
@@ -49,8 +51,15 @@ export function EmptyState({ onTry }: { onTry: (trip: TripRequest) => void }) {
   )
 }
 
+interface LoadingStateProps {
+  interval: number
+  /** Set while a busy service makes the plan wait for an automatic retry. */
+  retry: BusyRetry | null
+  onRetryNow: () => void
+}
+
 /** Planning takes a few seconds: say what the server is doing and how long it has been. */
-export function LoadingState({ interval }: { interval: number }) {
+export function LoadingState({ interval, retry, onRetryNow }: LoadingStateProps) {
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
     const timer = window.setInterval(() => setSeconds((s) => s + 1), 1000)
@@ -59,14 +68,24 @@ export function LoadingState({ interval }: { interval: number }) {
 
   return (
     <section aria-busy="true" aria-live="polite" className="space-y-4">
-      <p className="flex gap-2 text-sm leading-snug text-fg-muted">
-        <CloudSunIcon size={18} className="mt-px shrink-0 animate-pulse text-teal" aria-hidden />
-        <span>
-          Finding three truck routes and reading the forecast every {interval} mi at the
-          truck&apos;s arrival time. This usually takes about five seconds
-          {seconds > 1 && <span className="text-fg-subtle tabular-nums"> ({seconds} s)</span>}.
-        </span>
-      </p>
+      {retry ? (
+        <RetryNotice
+          retry={retry}
+          onRetryNow={onRetryNow}
+          className="text-sm leading-snug text-fg-muted"
+        >
+          {retry.service} is busy right now, so the plan has to wait.
+        </RetryNotice>
+      ) : (
+        <p className="flex gap-2 text-sm leading-snug text-fg-muted">
+          <CloudSunIcon size={18} className="mt-px shrink-0 animate-pulse text-teal" aria-hidden />
+          <span>
+            Finding three truck routes and reading the forecast every {interval} mi at the
+            truck&apos;s arrival time. This usually takes about five seconds
+            {seconds > 1 && <span className="text-fg-subtle tabular-nums"> ({seconds} s)</span>}.
+          </span>
+        </p>
+      )}
       <div className="space-y-2" aria-hidden>
         <div className="shimmer h-3 w-24 rounded" />
         <div className="shimmer h-6 w-56 rounded" />

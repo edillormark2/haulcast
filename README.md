@@ -66,11 +66,11 @@ database are needed. Every trip is a URL, so plans are shareable links.
 
 | Command | Where | What |
 | --- | --- | --- |
-| `uv run pytest` | `backend/` | 118 tests: risk boundaries, ranking, geometry, API with faked services |
+| `uv run pytest` | `backend/` | 136 tests: risk boundaries, ranking, geometry, rate limits, API with faked services |
 | `uv run ruff check . && uv run mypy planner config` | `backend/` | Lint and strict type-check |
-| `npm test` | `frontend/` | 41 tests: thresholds, heatmap sampling, geometry, URL state, UI |
+| `npm test` | `frontend/` | 64 tests: thresholds, heatmap sampling, geometry, URL state, retries, UI |
 | `npm run lint && npm run build` | `frontend/` | ESLint (strict, type-aware), type-check, production build |
-| `npm run test:e2e` | `frontend/` | Playwright smoke test in Chromium, network stubbed (first: `npx playwright install chromium`) |
+| `npm run test:e2e` | `frontend/` | Playwright tests in Chromium, network stubbed (first: `npx playwright install chromium`) |
 
 ## How a plan is made
 
@@ -107,7 +107,10 @@ flowchart LR
      through. Rain is `rain + showers` (liquid only); snow is `snowfall` in inches.
 
    Lookups are snapped to a 0.05° lattice (≤ 3.5 km, finer than the forecast models),
-   de-duplicated across routes, batched 150 per request and cached for 30 minutes.
+   de-duplicated across routes, batched 150 per request and cached for 30 minutes. The
+   window starts at the departure's 6-hour UTC block and covers at least the heatmap's 48
+   hours, so the heatmap, other intervals and nearby departures reuse the same forecasts
+   (see [Assumptions and limits](#assumptions-and-limits)).
 4. **Risk, exposure, recommendation.** See below.
 
 ## Risk rules and recommendation
@@ -171,6 +174,14 @@ The recommendation comes with:
 
 - **Grid.** The heatmap samples a grid over the routes, limited to cells within 35 miles
   of any route. Grid spacing adapts so a trip needs at most 220 forecast points.
+- **Reusing the plan's forecasts.** A cell that contains one of the plan's checkpoints on
+  a whole multiple of 50 miles is read at that checkpoint, whose forecast the plan has
+  already fetched, instead of at its centre. Every interval (10, 25 or 50 mi) includes
+  those checkpoints, so the heatmap is the same whatever the interval. This saves 30–54%
+  of the heatmap's forecast calls on the sample trips. The cost is a value read up to half
+  a cell from where it is drawn. Over all 49 frames, checked against a 1.4–1.7× finer grid,
+  the heatmap catches 3–4 percentage points less of the risky area (Chicago → Denver: 65%
+  instead of 68%), about what one coarser grid step costs.
 - **Frames.** Frame *k* is the weather at *departure + k hours*, read with the same
   function the checkpoints use, so the two agree at whole hours.
 - **Packing.** Wind, rain, snow and a corridor-edge weight are packed as RGBA bytes. Every
@@ -247,14 +258,15 @@ api/index.py                    Vercel entry point (WSGI)
 - **First paint needs no JavaScript.** `index.html` holds a static shell of the panel
   and a "Loading map…" pill, styled by the app's stylesheet, so the layout appears as soon
   as the HTML and CSS arrive.
-- **The panel doesn't wait for the map.** The app's own code is 35 kB gzipped. MapLibre
+- **The panel doesn't wait for the map.** The app's own code is 36 kB gzipped. MapLibre
   (284 kB) loads as a separate lazy chunk that `index.html` preloads at low priority
   ([`vite.config.ts`](frontend/vite.config.ts)), so the form works first and the map
   follows. React, UI primitives and MapLibre cache in separate chunks.
 - **Every wait is visible.** Status pills cover the map's first load, slow tiles,
   planning and re-planning. Origin and destination pulse on the map while routes are
   found, the forecast bar says when the heatmap is loading, and place search shows a
-  spinner.
+  spinner. When a free service is busy, the panel and the forecast bar say which one, count
+  down to an automatic retry, and offer to try at once.
 - **Plan cost.**
   - **Routes** are cached for 30 minutes, so changing the checkpoint interval re-plans in
     about 0.3 s.
@@ -297,7 +309,7 @@ All responses are JSON; errors share one envelope:
 | --- | --- |
 | 400 `invalid_request` | Field errors, with per-field messages |
 | 422 `no_route` | No road connects the places |
-| 503 `upstream_busy` | A free service is rate-limiting |
+| 503 `upstream_busy` | A free service is rate-limiting; `retry_after` (and `Retry-After`) says how many seconds to wait |
 | 502 `upstream_error` | A service failed |
 
 ## Design
@@ -350,7 +362,11 @@ All responses are JSON; errors share one envelope:
   C's checkpoints, steps and plays the forecast, and fails on any console error
   ([`smoke.spec.ts`](frontend/e2e/smoke.spec.ts)). Chromium runs with SwiftShader, so the map
   gets WebGL 2 without a GPU; where WebGL is still missing, the test checks the map's fallback
-  message instead.
+  message instead. A second test refuses the first plan and heatmap requests the way a busy
+  Open-Meteo would, and checks that the app says so, counts down and retries on its own.
+- **Rate limits have their own tests:** which refusals are retried and which are
+  reported, batches kept after a refusal, and older forecasts standing in
+  ([`test_upstream_limits.py`](backend/planner/tests/test_upstream_limits.py)).
 - **Static checks run strict.** Ruff and mypy (strict) on the backend; ESLint
   (`strictTypeChecked`), TypeScript strict and Prettier on the frontend. CI runs all of it
   ([`ci.yml`](.github/workflows/ci.yml)).
@@ -390,6 +406,44 @@ Optional environment variables:
 - **Free public services** (Valhalla, OSRM, Open-Meteo, Photon, OpenFreeMap) have
   fair-use limits and variable latency: a first plan takes about 3–10 s, repeats are
   cached. For production, point the URLs at paid or self-hosted instances.
+- **Open-Meteo's free tier is the tightest limit.** It allows 600 calls a minute, 5,000 an
+  hour and 10,000 a day per client IP, and each location in a request is one call. On
+  Vercel the function shares its outgoing IP with other tenants, so the real budget is
+  smaller, and unknown. Calls per sample trip, with the heatmap requested right after the
+  plan:
+
+  | Trip | Plan | Heatmap | Total | Total before |
+  | --- | --- | --- | --- | --- |
+  | Dallas → Atlanta, every 25 mi | 100 | 110 | 210 | 260 |
+  | Chicago → Denver, every 25 mi | 136 | 150 | 286 | 350 |
+  | Los Angeles → Chicago, every 50 mi | 102 | 84 | 186 | 283 |
+
+  - **Where the savings come from.** The heatmap reuses the plan's checkpoint forecasts.
+    A heatmap served by a different server instance than its plan pays full price: 160,
+    214 and 181 calls. A 10-mile interval still costs one call per checkpoint, about 500
+    for Los Angeles → Chicago.
+  - **Repeat views cost less.** Plans and heatmaps share one forecast window per 6-hour
+    departure block, since Open-Meteo charges per location, not per hour. A later
+    departure in the same block, or a coarser interval, costs no calls. A finer interval
+    pays only for its new checkpoints. A replayed seven-step review session (three samples,
+    two interval changes, a later departure) fell from 1,464 calls to 970.
+  - **Refused batches don't waste the rest.** Forecasts are cached batch by batch, so a
+    retry after a refusal pays only for the cells still missing.
+- **When Open-Meteo refuses anyway,** the app degrades step by step:
+  - **The server reports which limit ran out.** It reads that from the 429's reason and
+    answers 503 `upstream_busy` with `retry_after`. That's 20 s for the per-minute limit,
+    which clears every minute, or the time to the next UTC hour or day for a used-up
+    quota. It doesn't sleep through a wait it can't outlast. "Too many concurrent
+    requests" clears in moments, so it is retried within the request.
+  - **The browser waits and retries on its own.** It shows which service is busy and
+    counts down, retrying up to three times while each wait is a minute or less. Longer
+    waits say when to come back.
+  - **Older forecasts stand in.** Forecasts stay cached for 6 hours. If every cell a
+    refused plan needs was fetched before, the plan uses those forecasts and says how old
+    they are.
+- **No cross-instance cache.** Sharing forecasts between function instances would need a
+  store such as Vercel KV or Redis, and so an account and a key. Self-hosting Open-Meteo
+  (`OPEN_METEO_URL`) removes the limits altogether.
 - **Snowfall** comes from Open-Meteo, which converts snow water at a fixed 7:1 ratio, so
   light, fluffy snow may read low.
 

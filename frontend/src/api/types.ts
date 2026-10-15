@@ -98,8 +98,19 @@ export interface Thresholds {
 
 export interface HeatmapRequest {
   corridor: [number, number][][]
+  /** Checkpoint cells the plan already fetched, so the heatmap can reuse them. */
+  anchors: [number, number][]
   departure: string
   load_lb: number
+}
+
+export interface ForecastMeta {
+  forecast_cells: number
+  /** Cells that cost an Open-Meteo call; the rest came from the server's cache. */
+  fetched_cells: number
+  /** Set when Open-Meteo failed and older cached forecasts stood in. */
+  stale_since: string | null
+  timings_ms: Record<string, number>
 }
 
 export interface Plan {
@@ -116,10 +127,7 @@ export interface Plan {
   }
   heatmap_request: HeatmapRequest
   notes: string[]
-  meta: {
-    forecast_cells: number
-    timings_ms: Record<string, number>
-  }
+  meta: ForecastMeta
 }
 
 export interface HeatmapPayload {
@@ -139,7 +147,7 @@ export interface HeatmapPayload {
   thresholds: Record<Factor, Thresholds>
   /** base64 RGBA bytes: frames × rows × columns × [wind, rain, snow, corridor weight]. */
   data: string
-  meta: { forecast_cells: number; timings_ms: Record<string, number> }
+  meta: ForecastMeta
 }
 
 export interface RiskRules {
@@ -160,6 +168,8 @@ export interface ApiErrorBody {
     code: string
     message: string
     fields?: Record<string, unknown>
-    retry_after?: number
+    service?: string
+    /** Seconds to wait before trying again (busy or rate-limited), when known. */
+    retry_after?: number | null
   }
 }

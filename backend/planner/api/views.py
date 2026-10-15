@@ -93,7 +93,8 @@ class HeatmapView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         lines = [[Coordinate(lat, lon) for lon, lat in line] for line in data["corridor"]]
-        heatmap = build_heatmap(lines, data["departure"], data["load_lb"])
+        anchors = [Coordinate(lat, lon) for lon, lat in data["anchors"]]
+        heatmap = build_heatmap(lines, data["departure"], data["load_lb"], anchors)
         return Response(present_heatmap(heatmap))
 
 

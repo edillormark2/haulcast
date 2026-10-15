@@ -61,13 +61,14 @@ main decisions went the way they did.
   - **Layer order.** Weather sits under roads and route lines under labels.
 - **Delivery is fast.**
   - A static shell in `index.html` paints the layout before any JavaScript runs.
-  - The app's own code is 35 kB gzipped. MapLibre is a lazy chunk, preloaded at low
+  - The app's own code is 36 kB gzipped. MapLibre is a lazy chunk, preloaded at low
     priority, so the panel works while the map downloads. Vendor chunks cache separately.
   - Fonts are self-hosted, and the Latin subset is preloaded.
   - The API function runs in Frankfurt, beside its upstream services, and the CDN caches
     rules and place searches.
 - **Every wait is visible.** The map, slow tiles, planning, the heatmap, the load rules
-  and place search each have their own loading state.
+  and place search each have their own loading state. A busy free service gets a named
+  countdown to an automatic retry.
   - API responses are compact: geometry is simplified to about 30 m, and the heatmap is
     one base64 byte array.
 - **Motion is purposeful.**
@@ -102,6 +103,9 @@ main decisions went the way they did.
 | No Travel ranked before the brief's criteria | Treating it as Severe | A route through No Travel can't be driven as planned |
 | Classify interpolated values, not interpolated levels | Interpolating levels | Avoids false bands between calm and stormy cells |
 | Clamped Catmull-Rom spatial interpolation | Bilinear, B-spline | Round contours, exact at cells, never beyond the data (a B-spline would understate peaks) |
+| One forecast window per 6-hour departure block, shared by the plan and its heatmap | A window per request | Open-Meteo's free tier charges per location, not per hour, so the longer window is free, and the heatmap, coarser intervals and nearby departures reuse its forecasts |
+| Heatmap cells read at the plan's 50-mile checkpoints when they contain one | Always at the cell centre | 30–54% fewer heatmap calls on the sample trips, for about the accuracy of one coarser grid step (measured against a finer grid over 49 frames) |
+| Busy services answered with `retry_after`, retried by the browser with a countdown | Retrying inside the request | A per-minute limit can outlast any request; the user sees what is happening and can try at once |
 | Stateless API with the trip in the URL | Persisting plans in a database | Shareable links, any instance serves any request, nothing to migrate; forecasts are refreshed on every visit |
 | MapLibre directly (no React wrapper) | react-map-gl | Full control of a custom WebGL layer under MapLibre 6; fewer moving parts |
 | Base UI primitives, native radios for segmented controls | Radix, React Aria | Accessible combobox, slider and tabs from one family; radios need no JS |

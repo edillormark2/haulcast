@@ -98,6 +98,26 @@ class TestCorridor:
         assert min(weights) == 0
         assert all(0 <= w <= 1 for w in weights)
 
+    def test_cells_are_read_at_the_anchor_nearest_their_centre(self) -> None:
+        corridor = build_corridor(
+            [line(32.0)], buffer_mi=35, max_cells=500, min_step_deg=0.1, max_step_deg=0.6
+        )
+        grid, inside = corridor.grid, corridor.cell_indices
+        cell = inside[len(inside) // 2]
+        centre = grid.point(cell)
+        near = Coordinate(centre.lat + 0.1 * grid.lat_step, centre.lon)
+        far = Coordinate(centre.lat - 0.4 * grid.lat_step, centre.lon + 0.3 * grid.lon_step)
+        outside = grid.point(
+            next(i for i, d in enumerate(corridor.distances_mi) if d > corridor.buffer_mi)
+        )
+        off_grid = Coordinate(centre.lat + 50, centre.lon)
+
+        samples = corridor.sample_points([far, near, outside, off_grid])
+
+        assert samples[cell] == near
+        assert list(samples) == inside
+        assert all(samples[i] == grid.point(i) for i in inside if i != cell)
+
     def test_cells_outside_take_the_nearest_inside_value(self) -> None:
         corridor = build_corridor(
             [line(32.0)], buffer_mi=35, max_cells=500, min_step_deg=0.1, max_step_deg=0.6
@@ -108,12 +128,17 @@ class TestCorridor:
         assert all(source in inside for source in nearest)
 
 
-def test_forecast_window_covers_the_trip_and_rounds_to_12_hours() -> None:
-    departure = 1_792_000_800 + 20 * 60  # 20 minutes past an hour
-    window = ForecastWindow.covering(departure, hours=30)
-    assert window.start == 1_792_000_800
-    assert window.end - window.start == 36 * HOUR_S
-    assert window.end >= departure + 31 * HOUR_S
+def test_forecast_windows_start_on_6_hour_blocks_and_cover_the_heatmap() -> None:
+    block = 1_792_000_800  # 00:00 UTC
+    departure = block + 2 * HOUR_S + 20 * 60
+    plan = ForecastWindow.covering(departure, hours=30)
+    assert plan == ForecastWindow.covering(departure, hours=48)  # the heatmap's window
+    assert plan.start == block
+    assert plan.end >= departure + 49 * HOUR_S
+    assert (plan.end - plan.start) % (12 * HOUR_S) == 0
+    # Departures in the same block share it; longer trips get a longer one.
+    assert ForecastWindow.covering(block + 5 * HOUR_S, hours=10) == plan
+    assert ForecastWindow.covering(departure, hours=60).end >= departure + 61 * HOUR_S
 
 
 def test_points_snap_to_a_0_05_degree_lattice() -> None:

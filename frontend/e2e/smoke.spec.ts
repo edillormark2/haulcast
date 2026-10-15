@@ -89,15 +89,63 @@ test('plans a sample trip, compares routes, plays the trip and starts over', asy
   expect(errors).toEqual([])
 })
 
+test('waits out a busy weather service and tries again on its own', async ({ page }) => {
+  const errors: string[] = []
+  page.on('console', (message) => {
+    // The browser logs each refused request; the app itself must log nothing.
+    const refused = message.text().includes('status of 503')
+    if (message.type() === 'error' && !refused) errors.push(message.text())
+  })
+  const api = await stubNetwork(page, { busyOnce: ['POST /api/plans/', 'POST /api/heatmap/'] })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Dallas to Atlanta' }).click()
+
+  // The plan says why it is waiting, then arrives without a click.
+  await expect(
+    page.getByText(/Open-Meteo is busy right now, so the plan has to wait/),
+  ).toBeVisible()
+  const recommendation = page.getByRole('region', { name: 'Route B via I-30 & I-22' })
+  await expect(recommendation).toContainText('Recommended')
+
+  // The forecast map does the same.
+  const timeline = page.getByRole('region', { name: 'Forecast timeline' })
+  await expect(timeline).toContainText('Open-Meteo is busy, so the forecast map has to wait.')
+  await expect(timeline.getByText('Moderate', { exact: true })).toBeVisible()
+
+  expect(api.refused).toEqual(['POST /api/plans/', 'POST /api/heatmap/'])
+  expect(api.unstubbed).toEqual([])
+  expect(errors).toEqual([])
+})
+
 interface FakeApi {
   /** Trips the app asked to plan. */
   plans: TripRequest[]
+  /** Requests answered with a busy refusal. */
+  refused: string[]
   /** Requests no stub answered. They are blocked, so a run never reaches a real service. */
   unstubbed: string[]
 }
 
-async function stubNetwork(page: Page): Promise<FakeApi> {
-  const api: FakeApi = { plans: [], unstubbed: [] }
+/** Refused the first time, as Open-Meteo's per-minute limit would, asking for a 2 s wait. */
+const BUSY = {
+  status: 503,
+  headers: { 'Retry-After': '2' },
+  json: {
+    error: {
+      code: 'upstream_busy',
+      message: 'Open-Meteo is busy right now. Try again in a minute.',
+      service: 'Open-Meteo',
+      retry_after: 2,
+    },
+  },
+}
+
+async function stubNetwork(
+  page: Page,
+  { busyOnce = [] }: { busyOnce?: string[] } = {},
+): Promise<FakeApi> {
+  const api: FakeApi = { plans: [], refused: [], unstubbed: [] }
   const block = (route: Route) => {
     api.unstubbed.push(`${route.request().method()} ${route.request().url()}`)
     return route.abort('blockedbyclient')
@@ -113,7 +161,12 @@ async function stubNetwork(page: Page): Promise<FakeApi> {
 
   await page.route('**/api/**', (route) => {
     const request = route.request()
-    switch (`${request.method()} ${new URL(request.url()).pathname}`) {
+    const endpoint = `${request.method()} ${new URL(request.url()).pathname}`
+    if (busyOnce.includes(endpoint) && !api.refused.includes(endpoint)) {
+      api.refused.push(endpoint)
+      return route.fulfill(BUSY)
+    }
+    switch (endpoint) {
       case 'GET /api/rules/':
         return route.fulfill({ json: RULES })
       case 'GET /api/geocode/':

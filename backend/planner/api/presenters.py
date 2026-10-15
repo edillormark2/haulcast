@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from bisect import bisect_left
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -10,7 +11,8 @@ from typing import Any
 from planner.domain.geometry import simplify, trace
 from planner.domain.recommendation import CRITERIA_ORDER
 from planner.domain.risk import LOAD_RULES, SCALES, BandScale, Factor, RiskLevel, scales_for_load
-from planner.services.heatmap import STEP, Heatmap
+from planner.services.forecasts import snap
+from planner.services.heatmap import ANCHOR_INTERVAL_MI, STEP, Heatmap
 from planner.services.routing import ROUTE_COUNT
 from planner.services.trip_planner import Checkpoint, NamedPlace, RoutePlan, TripPlan
 
@@ -58,15 +60,26 @@ def present_plan(plan: TripPlan) -> dict[str, Any]:
                 [p.lon_lat(4) for p in simplify(route.option.line.points, CORRIDOR_TOLERANCE_MI)]
                 for route in plan.routes
             ],
+            "anchors": _heatmap_anchors(plan),
             "departure": departure,
             "load_lb": request.load_lb,
         },
         "notes": _notes(plan),
-        "meta": {
-            "forecast_cells": plan.forecast_cells,
-            "timings_ms": plan.timings_ms,
-        },
+        "meta": _forecast_meta(plan.forecast_cells, plan.fetched_cells, plan.stale_since)
+        | {"timings_ms": plan.timings_ms},
     }
+
+
+def _heatmap_anchors(plan: TripPlan) -> list[list[float]]:
+    """The forecast cells of the checkpoints the heatmap reads route cells at
+    (see heatmap.ANCHOR_INTERVAL_MI), sent back with the heatmap request."""
+    cells = dict.fromkeys(
+        snap(checkpoint.coordinate)
+        for route in plan.routes
+        for checkpoint in route.checkpoints
+        if checkpoint.mile % ANCHOR_INTERVAL_MI == 0 or checkpoint is route.checkpoints[-1]
+    )
+    return [cell.lon_lat(4) for cell in cells]
 
 
 def _notes(plan: TripPlan) -> list[str]:
@@ -77,7 +90,22 @@ def _notes(plan: TripPlan) -> list[str]:
             f"Only {count} found that differ meaningfully and take less than "
             "1.5× the fastest time, so fewer than three options are shown."
         )
+    if plan.stale_since is not None:
+        minutes = max(1, round((time.time() - plan.stale_since) / 60))
+        notes.append(
+            "Open-Meteo couldn't send fresh forecasts, so this plan uses ones "
+            f"fetched {minutes} min ago."
+        )
     return notes
+
+
+def _forecast_meta(cells: int, fetched: int, stale_since: float | None) -> dict[str, Any]:
+    """How many forecast cells were read and how many cost an Open-Meteo call."""
+    return {
+        "forecast_cells": cells,
+        "fetched_cells": fetched,
+        "stale_since": None if stale_since is None else iso(stale_since),
+    }
 
 
 def present_scales(scales: dict[Factor, BandScale]) -> dict[str, Any]:
@@ -108,7 +136,8 @@ def present_heatmap(heatmap: Heatmap) -> dict[str, Any]:
         "steps": {factor.value: step for factor, step in STEP.items()},
         "thresholds": present_scales(heatmap.scales),
         "data": heatmap.data_b64,
-        "meta": {"forecast_cells": heatmap.forecast_cells, "timings_ms": heatmap.timings_ms},
+        "meta": _forecast_meta(heatmap.forecast_cells, heatmap.fetched_cells, heatmap.stale_since)
+        | {"timings_ms": heatmap.timings_ms},
     }
 
 
