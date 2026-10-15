@@ -1,5 +1,10 @@
-import type { Factor, HeatmapPayload, Thresholds } from '../api/types'
+import type { Factor, HeatmapLayout, HeatmapPayload, Thresholds } from '../api/types'
+import { conditionsAt, type HourlySeries, roundHalfEven } from './forecast'
 import { HOUR_MS } from './time'
+
+const HOUR_S = HOUR_MS / 1000
+/** Bytes per sample and frame: wind, rain, snow. */
+const SAMPLE_BYTES = 3
 
 export interface HeatmapGrid {
   west: number
@@ -30,6 +35,83 @@ export function decodeHeatmap(payload: HeatmapPayload): HeatmapData {
     thresholds: payload.thresholds,
     texels: base64ToBytes(payload.data),
   }
+}
+
+/** The samples whose forecasts the browser fetches: those the plan didn't pack. */
+export function samplesToFetch(layout: HeatmapLayout): [number, number][] {
+  const anchored = base64ToBytes(layout.anchor_frames).length / (layout.frames * SAMPLE_BYTES)
+  return layout.samples.slice(anchored)
+}
+
+/**
+ * The heatmap from a plan's layout and the forecasts the browser fetched for
+ * `samplesToFetch`, byte for byte the texture the server would send.
+ */
+export function heatmapFromForecasts(
+  layout: HeatmapLayout,
+  series: readonly HourlySeries[],
+  thresholds: Record<Factor, Thresholds>,
+): HeatmapData {
+  const { grid, frames } = layout
+  const anchored = base64ToBytes(layout.anchor_frames)
+  const packed = packFrames(series, Date.parse(layout.start) / 1000, frames, layout.steps)
+  const sampleFrames = new Uint8Array(anchored.length + packed.length)
+  sampleFrames.set(anchored)
+  sampleFrames.set(packed, anchored.length)
+  if (sampleFrames.length !== layout.samples.length * frames * SAMPLE_BYTES) {
+    throw new Error(`Expected forecasts for ${layout.samples.length} samples`)
+  }
+
+  // Each cell shows its source sample, with the corridor weight in alpha.
+  const size = grid.columns * grid.rows
+  const alpha = base64ToBytes(layout.alpha)
+  const texels = new Uint8Array(frames * size * 4)
+  layout.sources.forEach((source, cell) => {
+    for (let frame = 0; frame < frames; frame++) {
+      const offset = (frame * size + cell) * 4
+      if (source >= 0) {
+        const at = (source * frames + frame) * SAMPLE_BYTES
+        texels.set(sampleFrames.subarray(at, at + SAMPLE_BYTES), offset)
+      }
+      texels[offset + 3] = alpha[cell] ?? 0
+    }
+  })
+  return {
+    grid,
+    startMs: Date.parse(layout.start),
+    frames,
+    steps: layout.steps,
+    thresholds,
+    texels,
+  }
+}
+
+/**
+ * Each series' frames from `startS`, hour by hour, as wind, rain and snow
+ * bytes, one series after another. A copy of the server's `pack_frames`
+ * (backend/planner/services/heatmap.py): a shared fixture checks they agree.
+ */
+export function packFrames(
+  series: readonly HourlySeries[],
+  startS: number,
+  frames: number,
+  steps: Record<Factor, number>,
+): Uint8Array {
+  const bytes = new Uint8Array(series.length * frames * SAMPLE_BYTES)
+  series.forEach((one, i) => {
+    for (let frame = 0; frame < frames; frame++) {
+      const { wind, rain, snow } = conditionsAt(one, startS + frame * HOUR_S)
+      bytes.set(
+        [quantize(wind, steps.wind), quantize(rain, steps.rain), quantize(snow, steps.snow)],
+        (i * frames + frame) * SAMPLE_BYTES,
+      )
+    }
+  })
+  return bytes
+}
+
+function quantize(value: number, step: number): number {
+  return Math.min(255, Math.max(0, roundHalfEven(value / step)))
 }
 
 /** Fractional frame for a moment, clamped to the data. */

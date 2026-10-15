@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
+import base64
 import time
 from bisect import bisect_left
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from planner.domain.geometry import simplify, trace
+from planner.domain.corridor import Grid
+from planner.domain.geometry import trace
 from planner.domain.recommendation import CRITERIA_ORDER
 from planner.domain.risk import LOAD_RULES, SCALES, BandScale, Factor, RiskLevel, scales_for_load
-from planner.services.forecasts import snap
-from planner.services.heatmap import ANCHOR_INTERVAL_MI, STEP, Heatmap
+from planner.integrations import open_meteo
+from planner.services.heatmap import FRAME_COUNT, STEP, Heatmap, HeatmapPlan
 from planner.services.routing import ROUTE_COUNT
 from planner.services.trip_planner import Checkpoint, NamedPlace, RoutePlan, TripPlan
 
 DISPLAY_TOLERANCE_MI = 0.02
 """About 30 m: invisible at any zoom where a whole route fits on screen."""
-CORRIDOR_TOLERANCE_MI = 1.0
-"""The heatmap corridor only needs the routes' general course."""
 
 
 def present_plan(plan: TripPlan) -> dict[str, Any]:
@@ -56,30 +56,16 @@ def present_plan(plan: TripPlan) -> dict[str, Any]:
             "warning": recommendation.warning,
         },
         "heatmap_request": {
-            "corridor": [
-                [p.lon_lat(4) for p in simplify(route.option.line.points, CORRIDOR_TOLERANCE_MI)]
-                for route in plan.routes
-            ],
-            "anchors": _heatmap_anchors(plan),
+            "corridor": [[p.lon_lat(4) for p in line] for line in plan.heatmap.lines],
+            "anchors": [cell.lon_lat(4) for cell in plan.heatmap.anchors],
             "departure": departure,
             "load_lb": request.load_lb,
         },
+        "heatmap_layout": present_heatmap_layout(plan.heatmap),
         "notes": _notes(plan),
         "meta": _forecast_meta(plan.forecast_cells, plan.fetched_cells, plan.stale_since)
         | {"timings_ms": plan.timings_ms},
     }
-
-
-def _heatmap_anchors(plan: TripPlan) -> list[list[float]]:
-    """The forecast cells of the checkpoints the heatmap reads route cells at
-    (see heatmap.ANCHOR_INTERVAL_MI), sent back with the heatmap request."""
-    cells = dict.fromkeys(
-        snap(checkpoint.coordinate)
-        for route in plan.routes
-        for checkpoint in route.checkpoints
-        if checkpoint.mile % ANCHOR_INTERVAL_MI == 0 or checkpoint is route.checkpoints[-1]
-    )
-    return [cell.lon_lat(4) for cell in cells]
 
 
 def _notes(plan: TripPlan) -> list[str]:
@@ -120,25 +106,54 @@ def present_scales(scales: dict[Factor, BandScale]) -> dict[str, Any]:
     }
 
 
-def present_heatmap(heatmap: Heatmap) -> dict[str, Any]:
-    grid = heatmap.corridor.grid
+def present_heatmap_layout(heatmap: HeatmapPlan) -> dict[str, Any]:
+    """Everything the browser needs to build the heatmap itself: it fetches
+    the samples after the anchored ones from `forecast` and packs them like the
+    server does. The thresholds are the plan's."""
+    layout, window = heatmap.layout, heatmap.window
     return {
-        "grid": {
-            "west": round(grid.west, 5),
-            "south": round(grid.south, 5),
-            "east": round(grid.east, 5),
-            "north": round(grid.north, 5),
-            "columns": grid.columns,
-            "rows": grid.rows,
-        },
+        "grid": _grid(layout.corridor.grid),
+        "start": iso(heatmap.departure_ts),
+        "frames": FRAME_COUNT,
+        "steps": _steps(),
+        "alpha": _base64(layout.alpha),
+        "sources": list(layout.sources),
+        "samples": [point.lon_lat(4) for point in layout.samples],
+        "anchor_frames": _base64(heatmap.anchor_frames),
+        "forecast": {"url": open_meteo.forecast_url(), "start": window.start, "end": window.end},
+    }
+
+
+def present_heatmap(heatmap: Heatmap) -> dict[str, Any]:
+    return {
+        "grid": _grid(heatmap.corridor.grid),
         "start": iso(heatmap.departure_ts),
         "frames": heatmap.frames,
-        "steps": {factor.value: step for factor, step in STEP.items()},
+        "steps": _steps(),
         "thresholds": present_scales(heatmap.scales),
         "data": heatmap.data_b64,
         "meta": _forecast_meta(heatmap.forecast_cells, heatmap.fetched_cells, heatmap.stale_since)
         | {"timings_ms": heatmap.timings_ms},
     }
+
+
+def _grid(grid: Grid) -> dict[str, Any]:
+    return {
+        "west": round(grid.west, 5),
+        "south": round(grid.south, 5),
+        "east": round(grid.east, 5),
+        "north": round(grid.north, 5),
+        "columns": grid.columns,
+        "rows": grid.rows,
+    }
+
+
+def _steps() -> dict[str, float]:
+    return {factor.value: step for factor, step in STEP.items()}
+
+
+def _base64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
 
 
 def present_rules() -> dict[str, Any]:

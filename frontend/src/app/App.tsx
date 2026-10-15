@@ -26,7 +26,7 @@ export function App() {
   const [trip, setTrip] = useTripParams()
   const planQuery = usePlan(trip)
   const plan = planQuery.data
-  const heatmapQuery = useHeatmap(plan?.heatmap_request)
+  const heatmapQuery = useHeatmap(plan)
   const desktop = useMediaQuery('(min-width: 768px)')
   const resetForNewPlan = useUiStore((state) => state.resetForNewPlan)
   const clearPlan = useUiStore((state) => state.clearPlan)
