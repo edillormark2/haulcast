@@ -95,7 +95,7 @@ main decisions went the way they did.
 | Decision | Alternatives considered | Why |
 | --- | --- | --- |
 | Keyless public services (Valhalla, OSRM, Open-Meteo, Photon, OpenFreeMap) | TomTom, HERE, Mapbox with API keys | Reviewers can clone and run without sign-ups; the URLs are configurable for paid or self-hosted instances |
-| Valhalla truck costing ≤ 800 mi, OSRM beyond | One provider | Truck restrictions where possible; the public Valhalla server rejects trips over 1,500 km |
+| Valhalla truck costing ≤ 800 mi, OSRM beyond, both capped at 65 mph | One provider | Truck restrictions where possible; the public Valhalla server rejects trips over 1,500 km. One speed cap keeps ETAs from depending on the engine (Valhalla's truck default is 75 mph) |
 | Generated detours for the missing options | Accepting fewer routes | The brief asks for three; quality checks keep them meaningful |
 | Sustained wind for scoring | Gusts | The literal reading of "Wind"; gusts would make most windy days No Travel. Gusts are still shown |
 | Continuous driving for ETAs | Hours-of-Service breaks | Matches the brief; HOS is listed as a known limit |

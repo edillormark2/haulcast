@@ -4,6 +4,7 @@ import { type SyntheticEvent, useId, useState } from 'react'
 import { useRiskRules } from '../../api/queries'
 import type { CheckpointInterval, Place, TripRequest } from '../../api/types'
 import { cx } from '../../lib/cx'
+import { timeZoneLabel } from '../../lib/format'
 import { nextHour, toLocalInputValue, toOffsetIso } from '../../lib/time'
 import { INTERVALS } from '../../state/tripParams'
 import { Button } from '../../ui/Button'
@@ -58,6 +59,11 @@ export function TripForm({ initial, busy, onSubmit }: TripFormProps) {
   }
 
   const loadLb = parseLoad(draft.load)
+  // The picker uses the viewer's clock; name its zone, since trips are often planned from elsewhere.
+  const departureTime = new Date(draft.departure)
+  const departureZone = timeZoneLabel(
+    Number.isNaN(departureTime.getTime()) ? new Date() : departureTime,
+  )
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
       <div className="relative space-y-3">
@@ -95,7 +101,7 @@ export function TripForm({ initial, busy, onSubmit }: TripFormProps) {
 
       <div>
         <label htmlFor={ids.departure} className="mb-1 block text-xs font-medium text-fg-muted">
-          Departure
+          Departure <span className="font-normal text-fg-subtle">({departureZone})</span>
         </label>
         <input
           id={ids.departure}

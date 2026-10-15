@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Checkpoint, Plan } from '../../api/types'
 import { cx } from '../../lib/cx'
-import { formatClock, formatDuration } from '../../lib/format'
+import { formatClock, formatDuration, timeZoneLabel } from '../../lib/format'
 import { riskAtLeast } from '../../lib/risk'
 import { sameCheckpoint, useUiStore } from '../../state/uiStore'
 import { RiskBadge } from '../../ui/RiskBadge'
@@ -28,6 +28,8 @@ export function CheckpointList({ plan, departureMs }: { plan: Plan; departureMs:
   }, [focused, route?.id])
 
   if (!route) return null
+  // Rows leave the zone out; this names it once. Two names only if a trip crosses a clock change.
+  const zones = [...new Set(route.checkpoints.map((c) => timeZoneLabel(Date.parse(c.eta))))]
   const visible = riskyOnly
     ? route.checkpoints.filter((checkpoint) => riskAtLeast(checkpoint.risk, 'moderate'))
     : route.checkpoints
@@ -56,7 +58,7 @@ export function CheckpointList({ plan, departureMs }: { plan: Plan; departureMs:
 
       <p className="text-xs text-fg-muted">
         {route.checkpoints.length} checkpoints every {plan.trip.interval_mi} mi, weather read at the
-        truck&apos;s arrival time.
+        truck&apos;s arrival time. Times are {zones.join(' / ')}, your time zone.
       </p>
 
       {visible.length === 0 ? (
@@ -115,7 +117,7 @@ function CheckpointRow({ routeId, checkpoint, departureMs, focused, last }: Chec
           {checkpoint.index === 0 ? 'Start' : last ? 'End' : `mi ${Math.round(checkpoint.mile)}`}
         </span>
         <span className="text-xs text-fg tabular-nums">
-          {formatClock(eta)}
+          {formatClock(eta, { zone: false })}
           <span className="ml-1.5 text-fg-subtle">
             +{formatDuration((eta - departureMs) / 1000)}
           </span>

@@ -22,22 +22,27 @@ const clock = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
 })
-const clockWithZone = new Intl.DateTimeFormat('en-US', {
-  weekday: 'short',
-  hour: 'numeric',
-  minute: '2-digit',
-  timeZoneName: 'short',
-})
 const hourOnly = new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric' })
+const zoneName = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
 
-/** "Tue 3:40 PM", in the viewer's time zone. */
-export function formatClock(time: Date | number, { zone = false } = {}): string {
-  return (zone ? clockWithZone : clock).format(time)
+/**
+ * "Tue 3:40 PM CDT": in the viewer's time zone, which it names, because a trip
+ * often crosses zones and the viewer may be in another one. A list that names
+ * the zone once in its heading passes `zone: false`.
+ */
+export function formatClock(time: Date | number, { zone = true } = {}): string {
+  const text = clock.format(time)
+  return zone ? `${text} ${timeZoneLabel(time)}` : text
 }
 
-/** "Tue 3 PM". */
+/** "Tue 3 PM CDT". */
 export function formatHour(time: Date | number): string {
-  return hourOnly.format(time)
+  return `${hourOnly.format(time)} ${timeZoneLabel(time)}`
+}
+
+/** The viewer's time zone at that moment: "CDT", "MST", or "GMT+8" outside North America. */
+export function timeZoneLabel(time: Date | number): string {
+  return zoneName.formatToParts(time).find((part) => part.type === 'timeZoneName')?.value ?? ''
 }
 
 /** "Chicago, Illinois, US" → "Chicago, Illinois". Drops a trailing country code. */

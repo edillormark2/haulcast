@@ -31,8 +31,8 @@ export function TripSummary({ trip, onEdit, onNewTrip }: TripSummaryProps) {
           {shortPlace(trip.destination.label)}
         </p>
         <p className="mt-0.5 text-xs text-fg-muted tabular-nums">
-          Leaves {formatClock(new Date(trip.departure), { zone: true })},{' '}
-          {formatPounds(trip.load_lb)}, weather every {trip.interval_mi} mi
+          Leaves {formatClock(new Date(trip.departure))}, {formatPounds(trip.load_lb)}, weather
+          every {trip.interval_mi} mi
         </p>
       </div>
     </div>

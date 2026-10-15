@@ -2,7 +2,8 @@
 
 Routing engine: Valhalla's truck costing (vehicle weight, truck restrictions)
 when the trip fits the public server's distance limit; otherwise OSRM's road
-network with a truck speed cap. The router's own alternatives come first. When
+network. Both plan the truck at no more than TRUCK_MAX_MPH, so ETAs don't
+depend on the engine. The router's own alternatives come first. When
 it returns fewer than three, more are found by routing through a via point
 offset to either side of the fastest route's midpoint, keeping candidates that
 are genuinely different and not much slower.
@@ -27,7 +28,7 @@ from planner.domain.geometry import (
 )
 from planner.domain.timeline import TravelTimeProfile
 from planner.integrations import osrm, valhalla
-from planner.integrations.trips import Trip
+from planner.integrations.trips import TRUCK_MAX_MPH, Trip
 from planner.integrations.valhalla import NoRouteError, Waypoint
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def find_route_options(
 ) -> list[RouteOption]:
     cache = caches["routes"]
     key = (
-        "routes:v1:"
+        "routes:v2:"
         + ":".join(f"{value:.4f}" for value in (*origin, *destination))
         + f":{load_lb:.0f}"
     )
@@ -134,7 +135,7 @@ def _choose_router(
     origin: Coordinate, destination: Coordinate, load_lb: float
 ) -> tuple[Router, str]:
     if haversine_mi(origin, destination) > VALHALLA_MAX_DIRECT_MI:
-        return _road_router, f"OSRM roads with a {osrm.TRUCK_MAX_MPH:.0f} mph truck speed cap"
+        return _road_router, f"OSRM roads with a {TRUCK_MAX_MPH:.0f} mph truck speed cap"
 
     gross_weight_lb = load_lb + TARE_WEIGHT_LB
 
@@ -150,7 +151,7 @@ def _choose_router(
         ]
         return valhalla.route(waypoints, gross_weight_lb=gross_weight_lb, alternates=alternates)
 
-    return truck_router, "Valhalla truck routing"
+    return truck_router, f"Valhalla truck routing with a {TRUCK_MAX_MPH:.0f} mph speed cap"
 
 
 def _road_router(points: Sequence[Coordinate], alternatives: int) -> list[Trip]:

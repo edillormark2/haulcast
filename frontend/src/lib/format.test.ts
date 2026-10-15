@@ -1,5 +1,29 @@
-import { formatDuration, formatMiles, shortPlace } from './format'
+import {
+  formatClock,
+  formatDuration,
+  formatHour,
+  formatMiles,
+  shortPlace,
+  timeZoneLabel,
+} from './format'
 import { toOffsetIso } from './time'
+
+describe('clock times', () => {
+  // Local wall times, so the tests hold in whatever zone they run.
+  const morning = new Date(2026, 9, 16, 6, 30)
+  const afternoon = new Date(2026, 9, 16, 15)
+
+  it("name the viewer's time zone", () => {
+    const zone = timeZoneLabel(morning)
+    expect(zone).toMatch(/^([A-Z]{2,5}|GMT[+-]\d{1,2}(:\d{2})?)$/)
+    expect(formatClock(morning)).toBe(`Fri 6:30 AM ${zone}`)
+    expect(formatHour(afternoon)).toBe(`Fri 3 PM ${timeZoneLabel(afternoon)}`)
+  })
+
+  it('leave the zone out for a list that names it once', () => {
+    expect(formatClock(morning, { zone: false })).toBe('Fri 6:30 AM')
+  })
+})
 
 describe('formatDuration', () => {
   it.each([

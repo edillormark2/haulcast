@@ -15,13 +15,17 @@ from typing import Any, Literal
 from planner import conf
 from planner.domain.geometry import Coordinate, decode_polyline
 from planner.integrations.http import HostThrottle, UpstreamError, request_json
-from planner.integrations.trips import Trip, make_trip, tally_highways
+from planner.integrations.trips import TRUCK_MAX_MPH, Trip, make_trip, tally_highways
 
 SERVICE = "Valhalla"
-MAX_PATH_MI = 1_500 / 1.609344
+KM_PER_MILE = 1.609344
+MAX_PATH_MI = 1_500 / KM_PER_MILE
 """The public server's limit on the summed straight-line distance between
 consecutive locations."""
 KG_PER_LB = 0.45359237
+TRUCK_TOP_SPEED_KPH = round(TRUCK_MAX_MPH * KM_PER_MILE)
+"""Valhalla's truck default is 120 km/h (75 mph), faster than a loaded truck
+drives and than the cap on OSRM trips. Valhalla takes whole km/h."""
 U_TURN_MANEUVERS = frozenset({12, 13})
 
 _throttle = HostThrottle(min_interval_s=1.1)
@@ -48,7 +52,12 @@ def route(
     body: dict[str, Any] = {
         "locations": [_location(w) for w in waypoints],
         "costing": "truck",
-        "costing_options": {"truck": {"weight": round(gross_weight_lb * KG_PER_LB / 1000, 2)}},
+        "costing_options": {
+            "truck": {
+                "weight": round(gross_weight_lb * KG_PER_LB / 1000, 2),
+                "top_speed": TRUCK_TOP_SPEED_KPH,
+            }
+        },
         "units": "miles",
         "directions_type": "maneuvers",
         "language": "en-US",
